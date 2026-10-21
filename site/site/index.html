@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="구독·지출·수입·대출을 정리하는 개인 가계부">
+<meta name="theme-color" content="#F2F5F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1311" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="꼬박꼬박">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<title>꼬박꼬박 가계부</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="auth" id="auth" hidden></div>
+<div id="appRoot" hidden>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.2 12 3.5l8.5 6.7V19a1.5 1.5 0 0 1-1.5 1.5h-4.2v-5.8H9.2v5.8H5A1.5 1.5 0 0 1 3.5 19z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.6" cy="6.5" r="1.2"/><circle cx="4.6" cy="12" r="1.2"/><circle cx="4.6" cy="17.5" r="1.2"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 3l3.5 3.5L17 10"/><path d="M3.5 12v-2A3.5 3.5 0 0 1 7 6.5h13.5"/><path d="M7 21l-3.5-3.5L7 14"/><path d="M20.5 12v2a3.5 3.5 0 0 1-3.5 3.5H3.5"/></symbol>
+  <symbol id="i-pie" viewBox="0 0 24 24"><path d="M11 4.1A8.5 8.5 0 1 0 19.9 13H11z"/><path d="M14 3.2a8.5 8.5 0 0 1 6.8 6.8H14z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6.5 13.5 12 19l5.5-5.5"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.2M12 17h.01"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/></symbol>
+  <symbol id="i-bank" viewBox="0 0 24 24"><path d="M3 9.5 12 4l9 5.5"/><path d="M5.5 10.5v6.5M10 10.5v6.5M14 10.5v6.5M18.5 10.5v6.5M3.5 20h17"/></symbol>
+  <symbol id="i-cash" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5h.01M18 14.5h.01"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M11 3.5l1.9 5.1 5.1 1.9-5.1 1.9L11 17.5l-1.9-5.1L4 10.5l5.1-1.9z"/><path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.5 21V4"/><path d="M5.5 4.5h12l-2.5 4 2.5 4h-12"/></symbol>
+  <symbol id="i-won" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.8"/><path d="M7.6 8.6l2 7 2.4-6 2.4 6 2-7M7 11.6h10"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+</svg>
+
+<div class="app">
+  <aside class="rail" aria-label="메뉴">
+    <p class="brand"><b>꼬박꼬박</b><small>가계부</small></p>
+    <button class="btn btn-primary btn-block" type="button" data-act="add"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>기록하기</button>
+    <button class="btn btn-soft btn-block ai-open" type="button" data-act="ai" hidden><svg class="i" aria-hidden="true"><use href="#i-spark"/></svg>AI에게 부탁하기</button>
+    <nav class="nav" aria-label="화면">
+      <button class="nav-item" type="button" data-view="home"><svg class="i" aria-hidden="true"><use href="#i-home"/></svg>한눈에</button>
+      <button class="nav-item" type="button" data-view="list"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>내역</button>
+      <button class="nav-item" type="button" data-view="subs"><svg class="i" aria-hidden="true"><use href="#i-repeat"/></svg>구독·정기결제</button>
+      <button class="nav-item" type="button" data-view="goals"><svg class="i" aria-hidden="true"><use href="#i-flag"/></svg>모으기</button>
+      <button class="nav-item" type="button" data-view="loans"><svg class="i" aria-hidden="true"><use href="#i-bank"/></svg>대출</button>
+      <button class="nav-item" type="button" data-view="credit"><svg class="i" aria-hidden="true"><use href="#i-won"/></svg>신용점수</button>
+      <button class="nav-item" type="button" data-view="budget"><svg class="i" aria-hidden="true"><use href="#i-pie"/></svg>예산</button>
+      <button class="nav-item" type="button" data-view="settings"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>설정</button>
+    </nav>
+    <p class="rail-foot" id="railFoot">기록은 내 계정에<br>저장돼요.</p>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <p class="brand only-phone"><b>꼬박꼬박</b><small>가계부</small></p>
+      <div class="month" id="monthNav">
+        <button class="icon-btn" type="button" data-act="month" data-d="-1" aria-label="이전 달"><svg class="i" aria-hidden="true"><use href="#i-left"/></svg></button>
+        <button class="month-label" type="button" id="monthLabel" data-act="month-now" title="이번 달로 이동"></button>
+        <button class="icon-btn" type="button" data-act="month" data-d="1" aria-label="다음 달"><svg class="i" aria-hidden="true"><use href="#i-right"/></svg></button>
+      </div>
+      <div class="top-end">
+        <span class="sync" id="sync" data-s="loading" role="status"><span class="t">불러오는 중</span></span>
+        <button class="icon-btn only-phone ai-open ai-chip" type="button" data-act="ai" aria-label="AI에게 부탁하기" hidden><svg class="i" aria-hidden="true"><use href="#i-spark"/></svg></button>
+        <button class="icon-btn only-phone" type="button" data-view="settings" aria-label="설정"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg></button>
+      </div>
+    </header>
+    <div id="notice"></div>
+    <main class="view" id="view"></main>
+  </div>
+</div>
+
+<nav class="tabbar" aria-label="화면">
+  <button class="tab" type="button" data-view="home"><svg class="i" aria-hidden="true"><use href="#i-home"/></svg>한눈에</button>
+  <button class="tab" type="button" data-view="list"><svg class="i" aria-hidden="true"><use href="#i-list"/></svg>내역</button>
+  <button class="tab-add" type="button" data-act="add" aria-label="기록하기"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></button>
+  <button class="tab" type="button" data-view="subs"><svg class="i" aria-hidden="true"><use href="#i-repeat"/></svg>구독</button>
+  <button class="tab" type="button" data-view="goals" data-views="goals loans credit"><svg class="i" aria-hidden="true"><use href="#i-won"/></svg>자산</button>
+  <button class="tab" type="button" data-view="budget"><svg class="i" aria-hidden="true"><use href="#i-pie"/></svg>예산</button>
+</nav>
+
+<div class="sheet-wrap" id="sheetWrap" hidden>
+  <div class="scrim" data-act="close"></div>
+  <section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></section>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</div>
+<script src="vendor/supabase.js"></script>
+<script src="config.js"></script>
+<script src="platform.js"></script>
+</body>
+</html>

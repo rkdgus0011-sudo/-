@@ -1,0 +1,21 @@
+:root { --bg:#F2F5F3; --surface:#fff; --ink:#17201C; --ink-2:#4A5651; --muted:#65706B; --line:#E2E8E5; --accent:#0C7F57; --fill:#FFF1C2; --fill-ink:#7A5200; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg:#0E1311; --surface:#161C19; --ink:#ECF1EE; --ink-2:#B3BEB9; --muted:#8E9993; --line:#27312D; --accent:#34B382; --fill:#3D3110; --fill-ink:#F3D27A; color-scheme: dark; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.75 "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
+main { max-width: 760px; margin: 0 auto; padding: 28px 16px 64px; }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; font-size: 14px; }
+.top a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.brand { font-weight: 800; letter-spacing: -.02em; }
+article { background: var(--surface); border-radius: 20px; padding: 28px 22px; box-shadow: 0 0 0 1px var(--line); }
+h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -.02em; }
+.lead { color: var(--ink-2); margin: 0 0 22px; }
+h2 { font-size: 17px; margin: 30px 0 8px; padding-top: 18px; border-top: 1px solid var(--line); }
+p, li { color: var(--ink-2); }
+ul, ol { padding-left: 20px; margin: 6px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; display: block; overflow-x: auto; }
+th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; min-width: 90px; }
+th { background: var(--bg); color: var(--ink); font-weight: 600; }
+mark.fill { background: var(--fill); color: var(--fill-ink); padding: 0 4px; border-radius: 4px; }
+.date { color: var(--muted); font-size: 14px; margin-top: 30px; }
+a { color: var(--accent); }
+@media (max-width: 480px) { article { padding: 22px 16px; } h1 { font-size: 21px; } }

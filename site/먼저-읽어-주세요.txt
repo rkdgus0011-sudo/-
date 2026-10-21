@@ -1,0 +1,11 @@
+꼬박꼬박 가계부 업데이트 (청년 맞춤 기능 + 공개 준비)
+
+1. GitHub ttb-ledger 저장소 > site 폴더로 들어가요.
+2. 오른쪽 위 [파일 추가 / Add file] > [파일 업로드 / Upload files]를 눌러요.
+3. 이 zip 안 site 폴더 속 파일 8개를 한꺼번에 끌어다 놓아요.
+   (index.html, app.js, styles.css, platform.js, sw.js, privacy.html, terms.html, legal.css)
+   config.js는 들어 있지 않아요. 내 서버 설정은 그대로 남아요.
+4. 아래 [변경 사항 커밋 / Commit changes]를 눌러요. 1~2분 뒤 사이트에 반영돼요.
+5. Supabase > SQL Editor에 supabase/schema.sql 전체를 붙여 넣고 Run 해요. (회원 탈퇴 기능)
+6. GitHub에서 privacy.html, terms.html을 열고 연필 아이콘(편집 / Edit)을 눌러
+   [운영자 이름], [문의 이메일], [프로젝트 지역]을 내 정보로 바꾼 뒤 커밋해요.
