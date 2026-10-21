@@ -31,7 +31,7 @@ const DEFAULT_METHODS = [
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const UNKNOWN_CAT = { id: '', name: '미분류', emoji: '🏷️', kind: 'out' };
 const BACKFILL_DAYS = 92; // auto-record never reaches further back than this
-const VIEW_NAMES = ['home', 'list', 'subs', 'loans', 'budget', 'settings'];
+const VIEW_NAMES = ['home', 'list', 'subs', 'goals', 'loans', 'budget', 'settings'];
 
 /* ================= utils ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -96,6 +96,8 @@ const S = {
   subsDoc: false,
   loans: {},                  // loanId -> loan | null(deleted)
   loansDoc: false, user: null, restore: null,
+  goals: {},                  // goalId -> savings goal | null(deleted)
+  goalsDoc: false,
   loaded: { months: false, meta: false },
   definitive: { months: false, meta: false },
   pending: 0, syncError: false, storeError: false,
@@ -300,6 +302,7 @@ function autoRecord() {
       (patches[ymOf(d)] ||= {})[id] = makeTx({ date: d, kind: 'out', amount: sub.amount, cat: sub.cat, memo: sub.name, method: sub.method, sub: sub.id, ex: !!sub.ex, at: parseD(d).getTime() + 9 * 36e5 });
     }
   }
+  autoRecordGoals(t, floor);
   for (const l of loansArr()) {
     if (!l.auto || !(l.principal > 0)) continue;
     const since = isYmd(l.since) ? l.since : t, from = since > floor ? since : floor;
@@ -318,6 +321,7 @@ function hasExamples() {
   if (cfg().budgetEx) return true;
   for (const id in S.subs) if (S.subs[id] && S.subs[id].ex) return true;
   for (const id in S.loans) if (S.loans[id] && S.loans[id].ex) return true;
+  for (const id in S.goals) if (S.goals[id] && S.goals[id].ex) return true;
   for (const ym in S.months) for (const id in S.months[ym]) { const t = S.months[ym][id]; if (t && t.ex) return true; }
   return false;
 }
@@ -327,7 +331,9 @@ function exampleCounts() {
   for (const id in S.subs) if (S.subs[id] && S.subs[id].ex) subs++;
   let loans = 0;
   for (const id in S.loans) if (S.loans[id] && S.loans[id].ex) loans++;
-  return { tx, subs, loans, budget: cfg().budgetEx };
+  let goals = 0;
+  for (const id in S.goals) if (S.goals[id] && S.goals[id].ex) goals++;
+  return { tx, subs, loans, goals, budget: cfg().budgetEx };
 }
 function clearExamples() {
   for (const ym in S.months) {
@@ -341,6 +347,9 @@ function clearExamples() {
   const lp = {};
   for (const id in S.loans) if (S.loans[id] && S.loans[id].ex) lp[id] = null;
   if (Object.keys(lp).length) writeLoans(lp);
+  const gp = {};
+  for (const id in S.goals) if (S.goals[id] && S.goals[id].ex) gp[id] = null;
+  if (Object.keys(gp).length) writeGoals(gp);
   if (cfg().budgetEx) saveSettings({ ...cfg(), budget: { total: 0, cats: {} }, budgetEx: false });
 }
 
@@ -365,13 +374,15 @@ function startLive(db) {
     onData();
   }, onStoreError);
   db.collection('meta').onSnapshot(snap => {
-    let st = null, subs = {}, subsDoc = false, loans = {}, loansDoc = false;
+    let st = null, subs = {}, subsDoc = false, loans = {}, loansDoc = false, sawGoals = false;
     for (const d of snap.docs) {
       const data = d.data() || {};
       if (d.id === 'settings') st = data;
       else if (d.id === 'subs') { subs = { ...(data.items || {}) }; subsDoc = true; }
       else if (d.id === 'loans') { loans = { ...(data.items || {}) }; loansDoc = true; }
+      else if (d.id === 'goals') { S.goals = { ...(data.items || {}) }; S.goalsDoc = true; sawGoals = true; }
     }
+    if (!sawGoals) { S.goals = {}; S.goalsDoc = false; }
     S.settings = st ? normSettings(st) : null; S.subs = subs; S.subsDoc = subsDoc; S.loans = loans; S.loansDoc = loansDoc; S.loaded.meta = true;
     if (st) applyTheme(S.settings.theme);
     if (!snap.metadata || !snap.metadata.fromCache) S.definitive.meta = true;
@@ -406,7 +417,7 @@ const isLoading = () => S.mode === 'loading' || (S.mode === 'live' && !(S.loaded
 
 function renderChrome() {
   for (const b of document.querySelectorAll('.nav [data-view], .tabbar [data-view]')) {
-    if (b.dataset.view === S.view) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    if ((b.dataset.views || b.dataset.view).split(' ').includes(S.view)) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   }
   $('#monthNav').hidden = !['home', 'list', 'budget'].includes(S.view);
   const [y, m] = S.ym.split('-').map(Number);
@@ -434,10 +445,10 @@ function renderNotice() {
   else if (S.storeError) h = `<div class="notice warn"><p>저장소와 연결이 끊겼어요. 페이지를 새로고침해 주세요.</p></div>`;
   else if (S.mode === 'live' && !isLoading() && hasExamples()) {
     const n = exampleCounts();
-    const what = [n.tx ? `예시 내역 ${n.tx}건` : '', n.subs ? `예시 구독 ${n.subs}개` : '', n.loans ? `예시 대출 ${n.loans}건` : '', n.budget ? '예시 예산' : ''].filter(Boolean).join(', ');
+    const what = [n.tx ? `예시 내역 ${n.tx}건` : '', n.subs ? `예시 구독 ${n.subs}개` : '', n.loans ? `예시 대출 ${n.loans}건` : '', n.goals ? `예시 모으기 ${n.goals}개` : '', n.budget ? '예시 예산' : ''].filter(Boolean).join(', ');
     h = S.confirmClear
       ? `<div class="notice"><p>${what}을 지울까요? 직접 적은 기록은 그대로 남아요.</p><div class="acts"><button class="btn btn-sm btn-primary" type="button" id="exYes" data-act="ex-clear">지우기</button><button class="btn btn-sm btn-soft" type="button" data-act="ex-cancel">취소</button></div></div>`
-      : `<div class="notice"><p>지금 보이는 내역·구독·대출·예산은 <b>예시</b>예요. 둘러본 뒤 지우고 내 기록을 시작하세요.</p><div class="acts"><button class="btn btn-sm btn-soft" type="button" id="exAsk" data-act="ex-ask">예시 지우기</button></div></div>`;
+      : `<div class="notice"><p>지금 보이는 내역·구독·모으기·대출·예산은 <b>예시</b>예요. 둘러본 뒤 지우고 내 기록을 시작하세요.</p><div class="acts"><button class="btn btn-sm btn-soft" type="button" id="exAsk" data-act="ex-ask">예시 지우기</button></div></div>`;
   }
   if (h !== lastNotice) {
     const a = document.activeElement, fid = a && $('#notice').contains(a) ? a.id : null;
@@ -449,7 +460,7 @@ function typingInView() {
   const a = document.activeElement;
   return !!a && $view.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(button|checkbox|radio|range|submit)$/.test(a.type)));
 }
-const VIEWS = { home: vHome, list: vList, subs: vSubs, loans: vLoans, budget: vBudget, settings: vSettings };
+const VIEWS = { home: vHome, list: vList, subs: vSubs, goals: vGoals, loans: vLoans, budget: vBudget, settings: vSettings };
 function renderView() {
   if (typingInView()) { deferred = true; return; } // never yank a field out from under the cursor
   deferred = false;
@@ -581,7 +592,7 @@ function vHome() {
     const v = sum(rest.map(r => r[1]));
     return `<div class="rank-row"><span class="emo" aria-hidden="true">⋯</span><span class="rank-main"><span class="rank-line"><span class="rank-name">그 외 ${rest.length}개</span><span class="rank-amt">${won(v)}</span></span><span class="bar"><span style="width:${(v / maxC * 100).toFixed(1)}%"></span></span></span><span class="rank-pct">${pct(v)}</span></div>`;
   })() : '');
-  const cats = `<section class="card" data-o="4">
+  const cats = `<section class="card" data-o="5">
     <div class="card-h"><h2 class="card-t">어디에 썼을까</h2>${outs.length ? `<span class="muted" style="font-size:13px">${outs.length}건</span>` : ''}</div>
     ${outs.length ? `<div class="rank">${catRows}</div>` : emptyBox(`${mLabel(ym)} 지출이 아직 없어요`, '지출을 기록하면 카테고리별로 모아서 보여 드려요.')}
   </section>`;
@@ -589,7 +600,7 @@ function vHome() {
   const ups = upcoming(30, 4);
   const monthEnd = `${curYm}-${pad(daysIn(curYm))}`;
   const restThisMonth = sum(subsArr().filter(s => s.active && s.amount > 0).map(s => { const d = nextOcc(s, addDays(t, 1)); return d <= monthEnd ? s.amount : 0; }));
-  const upc = `<section class="card" data-o="5">
+  const upc = `<section class="card" data-o="6">
     <div class="card-h"><h2 class="card-t">다가오는 정기결제</h2><button class="card-link" type="button" data-view="subs">전체${icon('right')}</button></div>
     ${ups.length ? `<div class="rank">${ups.map(({ s, d }) => { const m = methodOf(s.method); return `<button class="sub-row" type="button" data-act="edit-sub" data-id="${esc(s.id)}">
         <span class="emo" aria-hidden="true">${esc(s.emoji || catOf(s.cat).emoji)}</span>
@@ -603,7 +614,7 @@ function vHome() {
   for (const x of outs) byM[x.method || ''] = (byM[x.method || ''] || 0) + x.amount;
   const mRanked = Object.entries(byM).sort((a, b) => b[1] - a[1]);
   const maxM = mRanked.length ? mRanked[0][1] : 1;
-  const meth = `<section class="card" data-o="7">
+  const meth = `<section class="card" data-o="8">
     <div class="card-h"><h2 class="card-t">결제수단별 지출</h2></div>
     ${mRanked.length ? `<div class="rank">${mRanked.map(([id, v]) => {
       const m = methodOf(id), name = m ? m.name : '결제수단 없음';
@@ -613,14 +624,14 @@ function vHome() {
   </section>`;
 
   const recentList = list.slice(0, 6);
-  const recent = `<section class="card" data-o="8">
+  const recent = `<section class="card" data-o="9">
     <div class="card-h"><h2 class="card-t">최근 기록</h2><button class="card-link" type="button" data-view="list">전체 보기${icon('right')}</button></div>
     ${recentList.length ? `<div class="rank">${recentList.map(txRow).join('')}</div>` : emptyBox(`${mLabel(ym)} 기록이 없어요`, '', `<button class="btn btn-soft btn-sm" type="button" data-act="add">${icon('plus')}기록하기</button>`)}
   </section>`;
 
   const P = paceData(ym);
   const anyPace = P.thisC.some(v => v > 0) || P.hasPrev;
-  const pace = `<section class="card" data-o="6">
+  const pace = `<section class="card" data-o="7">
     <div class="card-h"><h2 class="card-t">누적 지출</h2><div class="legend"><span><i class="key"></i>${mLabel(ym)}</span>${P.hasPrev ? `<span><i class="key prev"></i>${mLabel(P.prevYm)}</span>` : ''}${P.B > 0 ? '<span><i class="key bud"></i>예산</span>' : ''}</div></div>
     ${anyPace ? (S.showTable ? paceTable(P) : `<div class="chart" id="pace" tabindex="0" role="img" aria-label="${esc(paceSummary(P))}"></div>`) + `<div class="chart-foot"><button class="card-link" type="button" id="paceToggle" data-act="pace-table">${S.showTable ? '그래프로 보기' : '표로 보기'}</button></div>`
       : emptyBox('아직 그릴 지출이 없어요', '기록이 쌓이면 날마다 얼마나 썼는지 지난달과 비교해 그려 드려요.')}
@@ -633,7 +644,7 @@ function vHome() {
 
   return `<div class="cols">
     <div class="col">${hero}${calCard}${pace}${recent}</div>
-    <div class="col">${budget}${cats}${upc}${meth}</div>
+    <div class="col">${budget}${homeGoalsCard()}${cats}${upc}${meth}</div>
   </div>`;
 }
 
@@ -1221,6 +1232,7 @@ actions에 넣을 수 있는 것:
 - {"type":"add_sub","name":"이름","amount":정수,"cycle":"month 또는 year","day":1~31,"month":1~12(매년일 때),"cat":"카테고리 id","method":"결제수단 id"}
 - {"type":"update_sub","id":"구독 id", 바꿀 필드만 (name, amount, cycle, day, month, cat, method, active)}
 - {"type":"delete_sub","id":"구독 id"}
+- {"type":"add_deposit","goal":"모으기 목표 id","amount":정수(뺄 때는 음수),"date":"YYYY-MM-DD","memo":"메모"}
 - {"type":"set_budget","total":정수(0이면 전체 예산 없음, 바꾸지 않으면 생략),"cats":{"카테고리 id":정수(0이면 그 예산 삭제)}}
 규칙:
 - 금액은 원 단위 정수야. '9천'은 9000, '1.5만'은 15000, '3만 5천'은 35000.
@@ -1242,6 +1254,9 @@ function aiContext() {
   const loans = loansArr();
   L.push('대출 (이름 | 원금 | 연이율% | 상환방식 | 남은 원금 | 이번 달 납입액 | 그중 이자 | 지금까지 낸 이자 | 앞으로 낼 이자 | 만기):');
   L.push(loans.length ? loans.map(l => { const s = loanStats(l); return `${l.name} | ${s.B0} | ${l.rate} | ${LOAN_TYPES[l.type]} | ${s.remaining} | ${s.thisMonth ? s.thisMonth.pay : 0} | ${s.thisMonth ? s.thisMonth.int : 0} | ${s.paidInt} | ${s.restInt} | ${s.end}`; }).join('\n') + '\n(대출 자체를 고치는 action은 없어. 대출 수정은 대출 화면의 고치기를 쓰라고 안내해.)' : '(없음)');
+  const gl = goalsArr();
+  L.push('모으기 목표 (id | 이름 | 종류 | 모은 돈 | 목표 금액 | 오늘까지 계획 | 목표일·만기 | 적금 세후 이자):');
+  L.push(gl.length ? gl.map(g => { const s = goalStats(g); return `${g.id} | ${g.name} | ${g.kind === 'saving' ? `정기적금 매월 ${g.monthly}` : '자유 모으기'} | ${s.saved} | ${s.target} | ${s.plan} | ${s.end} | ${s.net || 0}`; }).join('\n') : '(없음)');
   const months = Object.keys(S.months).filter(ym => txsOf(ym).length).sort();
   L.push('월별 합계 (원):');
   for (const ym of months) {
@@ -1313,6 +1328,14 @@ function applyAiActions(actions) {
         if (typeof a.active === 'boolean') { if (a.active && !cur.active && next.since < todayStr()) next.since = todayStr(); next.active = a.active; }
         putSub(id, next); subsAdded = subsAdded || next.active;
         changes.push(`구독 수정 · ${next.name} ${cycleText(next)} ${won(next.amount)}${next.active ? '' : ' (일시정지)'}`);
+      } else if (a.type === 'add_deposit') {
+        const gid = String(a.goal || ''), g = S.goals[gid], amount = toInt(a.amount);
+        if (!g) throw new Error('모으기 목표를 찾지 못했어요');
+        if (!amount) throw new Error('금액을 알 수 없어 기록하지 않았어요');
+        const did = uid('d'), date = isYmd(a.date) ? a.date : todayStr();
+        undo.push({ k: 'dep', gid, id: did });
+        writeGoals({ [gid]: { deposits: { [did]: { date, amount, memo: String(a.memo || '').slice(0, 30), auto: false, at: Date.now() } } } });
+        changes.push(`모으기 · ${g.name} ${amount > 0 ? '+' : '−'}${won(Math.abs(amount))}`);
       } else if (a.type === 'set_budget') {
         const st = cfg(), bud = { total: st.budget.total, cats: { ...st.budget.cats } }, bits = [];
         if (a.total != null) { const n = toInt(a.total); if (n >= 0) { bud.total = n; bits.push(n ? `전체 ${won(n)}` : '전체 예산 없음'); } }
@@ -1341,6 +1364,7 @@ function undoAi(i) {
     if (u.k === 'tx') (months[u.ym] ||= {})[u.id] = u.prev;
     else if (u.k === 'sub') subs[u.id] = u.prev;
     else if (u.k === 'settings') settings = u.prev;
+    else if (u.k === 'dep') writeGoals({ [u.gid]: { deposits: { [u.id]: null } } });
   }
   for (const ym in months) writeMonth(ym, months[ym]);
   if (Object.keys(subs).length) writeSubs(subs);
@@ -1463,7 +1487,7 @@ function ensureLoanCat() {
   if (!st.cats.some(c => c.id === 'loan')) saveSettings({ ...st, cats: [...st.cats, LOAN_CAT] });
 }
 function vLoans() {
-  const head = `<div class="view-h"><h1 class="view-title">대출</h1><button class="btn btn-primary btn-sm" type="button" data-act="add-loan" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}대출 추가</button></div>`;
+  const head = `<div class="view-h"><h1 class="view-title">대출</h1><div class="view-acts">${vAssetsSwitch('loans')}<button class="btn btn-primary btn-sm" type="button" data-act="add-loan" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}대출 추가</button></div></div>`;
   if (isLoading()) return head + `<section class="card">${emptyBox('불러오는 중이에요', '')}</section>`;
   const loans = loansArr();
   if (!loans.length) return head + `<section class="card">${emptyBox('등록된 대출이 없어요', '대출 원금, 이자율, 기간, 상환 방식을 넣으면 매달 갚을 돈과 이자를 계산하고 납입일에 자동으로 기록해 드려요.', `<button class="btn btn-primary btn-sm" type="button" data-act="add-loan">${icon('plus')}대출 추가</button>`)}</section>`;
@@ -1619,7 +1643,7 @@ async function loadAccount() {
 }
 function backupData() {
   const settings = clone(cfg());
-  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), months: clone(S.months) };
+  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), goals: clone(S.goals), months: clone(S.months) };
 }
 function csvData() {
   const q = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -1684,8 +1708,247 @@ function applyRestore() {
   if (Object.keys(subP).length) writeSubs(subP);
   const loanP = { ...(b.loans || {}) }; for (const k in S.loans) if (!(k in loanP)) loanP[k] = null;
   if (Object.keys(loanP).length) writeLoans(loanP);
+  const goalP = { ...(b.goals || {}) }; for (const k in S.goals) if (!(k in goalP)) goalP[k] = null;
+  if (Object.keys(goalP).length) { S.goals = {}; writeGoals(goalP); }
   if (b.settings) saveSettings(b.settings);
   toast('백업으로 되살렸어요');
+}
+
+/* ================= savings goals (모으기) ================= */
+const TAX = 0.154; // 이자소득세 15.4% (일반과세)
+const deepMerge = (a, b) => {
+  if (!a || typeof a !== 'object' || !b || typeof b !== 'object') return b;
+  const r = { ...a };
+  for (const k in b) r[k] = b[k] && typeof b[k] === 'object' && r[k] && typeof r[k] === 'object' ? deepMerge(r[k], b[k]) : b[k];
+  return r;
+};
+function goalsArr() {
+  const a = [];
+  for (const id in S.goals) { const g = S.goals[id]; if (g && g.name != null) a.push({ ...g, id }); }
+  return a.sort((x, y) => (x.start < y.start ? -1 : 1));
+}
+function writeGoals(patch) {
+  S.goals = deepMerge(S.goals, patch);
+  scheduleRender();
+  if (!S.db) return Promise.resolve();
+  const ref = S.db.doc('meta/goals');
+  return track(enqueue('meta/goals', async () => {
+    try { await retry(() => ref.update({ items: patch })); }
+    catch (e) {
+      if (e && e.code === 'invalid_argument' && !S.goalsDoc) await retry(() => ref.set({ items: patch }));
+      else throw e;
+    }
+    S.goalsDoc = true;
+  }));
+}
+const addMonthsYmd = (s, n) => { const y = +s.slice(0, 4), m = +s.slice(5, 7) - 1 + n; return occOn({ day: +s.slice(8) }, y + Math.floor(m / 12), (m % 12 + 12) % 12 + 1); };
+const monthsBetween = (a, b) => Math.max(0, (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)) - (+b.slice(8) < +a.slice(8) ? 1 : 0));
+// 정기적금 납입 일정: 시작한 달부터 term번, 매달 납입일에
+function savingSchedule(g) {
+  const out = [], n = Math.max(1, Math.min(600, g.term | 0));
+  const sy = +g.start.slice(0, 4), sm = +g.start.slice(5, 7) - 1;
+  for (let k = 0; k < n; k++) { const m = sm + k; out.push({ k: k + 1, date: occOn({ day: g.day }, sy + Math.floor(m / 12), (m % 12) + 1) }); }
+  return out;
+}
+function goalStats(g) {
+  const t = todayStr();
+  const deps = Object.entries(g.deposits || {}).filter(([, d]) => d && d.amount && isYmd(d.date)).map(([id, d]) => ({ ...d, id })).sort((a, b) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : (b.at || 0) - (a.at || 0)));
+  const saved = sum(deps.map(d => d.amount));
+  if (g.kind === 'saving') {
+    const sched = savingSchedule(g), n = sched.length, M = g.monthly || 0, r = (+g.rate || 0) / 100;
+    const end = addMonthsYmd(g.start, n); // 만기일
+    const interest = Math.round((M * r * n * (n + 1)) / 2 / 12);
+    const net = Math.round(interest * (1 - TAX));
+    const planCount = sched.filter(s => s.date <= t).length;
+    const next = sched.find(s => s.date > t) || null;
+    return { deps, saved, target: M * n, plan: M * planCount, end, interest, net, maturity: M * n + net, next, count: n, planCount, left: Math.max(0, M * n - saved), perMonth: M };
+  }
+  const end = isYmd(g.end) ? g.end : addMonthsYmd(g.start, 12), total = Math.max(1, diffDays(g.start, end));
+  const el = Math.min(total, Math.max(0, diffDays(g.start, t)));
+  const target = g.target || 0, left = Math.max(0, target - saved);
+  const mLeft = Math.max(1, monthsBetween(t, end) + (t < end ? 1 : 0));
+  return { deps, saved, target, plan: Math.round((target * el) / total), end, left, perMonth: t >= end ? left : Math.ceil(left / mLeft / 100) * 100 };
+}
+function vAssetsSwitch(cur) {
+  return `<div class="seg" role="group" aria-label="자산 화면"><button type="button" id="as-goals" data-view="goals" aria-pressed="${cur === 'goals'}">모으기</button><button type="button" id="as-loans" data-view="loans" aria-pressed="${cur === 'loans'}">대출</button></div>`;
+}
+function goalCard(g) {
+  const s = goalStats(g), t = todayStr();
+  const pct = s.target ? Math.min(1, s.saved / s.target) : 0, planPct = s.target ? Math.min(1, s.plan / s.target) : 0;
+  const diff = s.saved - s.plan, done = s.saved >= s.target && s.target > 0;
+  const dd = diffDays(t, s.end);
+  const status = done ? '<span class="state good">목표 달성</span>'
+    : diff === 0 ? '<span class="state good">계획대로 모으고 있어요</span>'
+    : diff > 0 ? `<span class="state good">계획보다 ${won(diff)} 앞서요</span>`
+    : `<span class="state warn">${icon('alert')}계획보다 ${won(-diff)} 덜 모았어요</span>`;
+  const meta = g.kind === 'saving'
+    ? `정기적금 · 매월 ${g.day}일 ${won(g.monthly)} · ${g.term}개월${+g.rate ? ` · 연 ${(+g.rate).toLocaleString('ko-KR', { maximumFractionDigits: 3 })}%` : ''}`
+    : `자유 모으기 · ${s.end.replace(/-/g, '.')}까지`;
+  const facts = g.kind === 'saving'
+    ? `<div><span class="stat-l">만기 예상 (세후)</span><span class="stat-v">${won(s.maturity)}</span><span class="sub">원금 ${fmt(s.target)} + 이자 ${fmt(s.net)}</span></div>
+       <div><span class="stat-l">다음 납입 ${s.next ? '· ' + ddayText(s.next.date) : ''}</span><span class="stat-v">${s.next ? won(g.monthly) : '납입 끝'}</span><span class="sub">${s.next ? `${mdw(s.next.date)} · ${s.next.k}/${s.count}회` : `만기 ${s.end.replace(/-/g, '.')}`}</span></div>`
+    : `<div><span class="stat-l">남은 금액</span><span class="stat-v">${won(s.left)}</span><span class="sub">${done ? '다 모았어요' : `목표 ${won(s.target)}`}</span></div>
+       <div><span class="stat-l">${dd > 0 ? '매달 이만큼 모으면 돼요' : '기간이 지났어요'}</span><span class="stat-v">${done ? '–' : won(s.perMonth)}</span><span class="sub">${dd > 0 ? `목표일까지 D-${dd}` : '목표일을 늘려 보세요'}</span></div>`;
+  return `<section class="card goal-card">
+    <div class="loan-top"><span class="emo" aria-hidden="true">${esc(g.emoji || (g.kind === 'saving' ? '🏦' : '🐷'))}</span><div style="min-width:0"><p class="loan-name">${esc(g.name)}${g.ex ? '<span class="tag">예시</span>' : ''}</p><p class="loan-meta">${esc(meta)}</p></div><button class="btn btn-ghost btn-sm" type="button" data-act="edit-goal" data-id="${esc(g.id)}">고치기</button></div>
+    <div class="loan-prog">
+      <div class="row"><span><b>${won(s.saved)}</b> 모음 · ${Math.round(pct * 100)}%</span>${status}</div>
+      <div class="goal-meter" role="img" aria-label="목표의 ${Math.round(pct * 100)}% 모음, 오늘 계획은 ${Math.round(planPct * 100)}%">${meter(pct, '', false)}<i class="plan-mark" style="left:${(planPct * 100).toFixed(1)}%" title="오늘까지 계획"></i></div>
+      <p class="bud-left">세로 선은 오늘까지 계획한 금액(${won(s.plan)})이에요.</p>
+    </div>
+    <div class="loan-facts">${facts}</div>
+    <div class="loan-acts"><button class="btn btn-primary btn-sm" type="button" data-act="goal-dep" data-id="${esc(g.id)}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}넣기·빼기</button><button class="btn btn-soft btn-sm" type="button" data-act="goal-hist" data-id="${esc(g.id)}">모은 기록 ${s.deps.length}건</button></div>
+  </section>`;
+}
+function vGoals() {
+  const head = `<div class="view-h"><h1 class="view-title">모으기</h1><div class="view-acts">${vAssetsSwitch('goals')}<button class="btn btn-primary btn-sm" type="button" data-act="add-goal" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}목표 추가</button></div></div>`;
+  if (isLoading()) return head + `<section class="card">${emptyBox('불러오는 중이에요', '')}</section>`;
+  const goals = goalsArr();
+  if (!goals.length) return head + `<section class="card">${emptyBox('모으는 목표가 없어요', '적금이나 여행 자금, 비상금처럼 모으고 싶은 돈을 목표로 만들면 얼마나 모였는지, 매달 얼마씩 넣으면 되는지 알려 드려요.', `<button class="btn btn-primary btn-sm" type="button" data-act="add-goal">${icon('plus')}목표 추가</button>`)}</section>`;
+  const stats = goals.map(g => goalStats(g));
+  const saved = sum(stats.map(s => s.saved)), target = sum(stats.map(s => s.target));
+  const thisMonth = ymOf(todayStr());
+  const monthIn = sum(stats.flatMap(s => s.deps.filter(d => ymOf(d.date) === thisMonth).map(d => d.amount)));
+  const summary = `<section class="card loan-sum">
+    <span class="hero-label">지금까지 모은 돈</span>
+    <p class="hero-num">${fmt(saved)}<span class="u">원</span></p>
+    <span class="muted" style="font-size:13.5px">목표 ${goals.length}개 · 전체 목표 ${won(target)}의 ${target ? Math.round((saved / target) * 100) : 0}%</span>
+    <div class="stat-grid">
+      <div><span class="stat-l">이번 달 모은 돈</span><span class="stat-v">${won(monthIn)}</span></div>
+      <div><span class="stat-l">남은 목표 금액</span><span class="stat-v">${won(sum(stats.map(s => s.left)))}</span></div>
+      <div><span class="stat-l">적금 만기 이자 (세후)</span><span class="stat-v">${won(sum(stats.map(s => s.net || 0)))}</span></div>
+      <div><span class="stat-l">한 달에 넣을 돈</span><span class="stat-v">${won(sum(stats.map(s => (s.left ? s.perMonth : 0))))}</span></div>
+    </div>
+  </section>`;
+  return head + summary + goals.map(goalCard).join('') + '<p class="set-note muted" style="font-size:12.5px">적금 이자는 매달 같은 금액을 넣는 정기적금 단리 기준이고, 이자소득세 15.4%를 뺀 금액이에요. 은행 상품마다 조금 다를 수 있어요.</p>';
+}
+function homeGoalsCard() {
+  const goals = goalsArr();
+  if (!goals.length) return '';
+  return `<section class="card" data-o="4">
+    <div class="card-h"><h2 class="card-t">모으는 중</h2><button class="card-link" type="button" data-view="goals">전체${icon('right')}</button></div>
+    <div class="rank">${goals.slice(0, 4).map(g => { const s = goalStats(g), p = s.target ? Math.min(1, s.saved / s.target) : 0; return `<button class="rank-row" type="button" data-view="goals"><span class="emo" aria-hidden="true">${esc(g.emoji || (g.kind === 'saving' ? '🏦' : '🐷'))}</span><span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(g.name)}</span><span class="rank-amt">${won(s.saved)}</span></span><span class="bar"><span style="width:${(p * 100).toFixed(1)}%"></span></span></span><span class="rank-pct">${Math.round(p * 100)}%</span></button>`; }).join('')}</div>
+  </section>`;
+}
+/* goal sheet */
+function openGoalSheet(id) {
+  if (S.mode === 'denied') return;
+  const g = id && S.goals[id], t = todayStr();
+  F = g
+    ? { mode: 'goal', id, kind: g.kind === 'saving' ? 'saving' : 'free', name: g.name || '', emoji: g.emoji || '', target: g.target || 0, monthly: g.monthly || 0, rate: String(g.rate ?? ''), term: g.term || 12, start: g.start || t, end: g.end || addMonthsYmd(t, 12), day: g.day || 1, auto: g.auto !== false, ex: !!g.ex, since: g.since || t }
+    : { mode: 'goal', id: null, kind: 'saving', name: '', emoji: '', target: 0, monthly: 0, rate: '', term: 12, start: t, end: addMonthsYmd(t, 12), day: +t.slice(8), auto: true, ex: false, since: t };
+  showSheet(goalSheet(), g ? null : '#g-name');
+}
+const canSaveGoal = () => !!(F && F.name.trim() && isYmd(F.start) && (F.kind === 'saving' ? F.monthly > 0 && F.term >= 1 && (F.rate === '' || (+F.rate >= 0 && +F.rate < 100)) : F.target > 0 && isYmd(F.end) && F.end > F.start));
+function goalPreview() {
+  if (!canSaveGoal()) return F.kind === 'saving' ? '매달 넣을 금액과 기간을 넣으면 만기에 받을 돈을 계산해 드려요.' : '목표 금액과 날짜를 넣으면 매달 얼마씩 모으면 되는지 알려 드려요.';
+  const s = goalStats({ ...F, rate: +F.rate || 0, deposits: {} });
+  return F.kind === 'saving'
+    ? `만기 ${s.end.replace(/-/g, '.')} · 원금 ${won(s.target)} + 세후 이자 ${won(s.net)} = ${won(s.maturity)}`
+    : `${s.end.replace(/-/g, '.')}까지 매달 약 ${won(Math.ceil(F.target / Math.max(1, monthsBetween(F.start, F.end) || 1) / 100) * 100)}씩 모으면 돼요`;
+}
+function goalSheet() {
+  const f = F, isEdit = !!f.id;
+  return `<form id="goalForm" autocomplete="off" novalidate>
+    <div class="sheet-h"><h2 id="sheetTitle">${isEdit ? '목표 고치기' : '모으기 목표 추가'}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    <div class="seg" role="group" aria-label="목표 종류" style="width:100%"><button type="button" id="gk-saving" data-act="g-kind" data-v="saving" ${pressed(f.kind === 'saving')}>정기적금</button><button type="button" id="gk-free" data-act="g-kind" data-v="free" ${pressed(f.kind === 'free')}>자유 모으기</button></div>
+    <div class="field"><label class="lab" for="g-name">이름</label><div class="set-row m" style="grid-template-columns:56px minmax(0,1fr)"><input class="input emoji" id="g-emoji" value="${esc(f.emoji)}" placeholder="${f.kind === 'saving' ? '🏦' : '🐷'}" aria-label="아이콘 이모지" maxlength="8"><input class="input" id="g-name" maxlength="30" placeholder="${f.kind === 'saving' ? '예: 1년 정기적금' : '예: 여행 자금, 비상금'}" value="${esc(f.name)}"></div></div>
+    ${f.kind === 'saving' ? `
+    <div class="field"><label class="lab" for="g-monthly">매달 넣는 금액</label><div class="amt"><input id="g-monthly" inputmode="numeric" placeholder="0" value="${f.monthly ? fmt(f.monthly) : ''}"><span>원</span></div></div>
+    <div class="field-row"><div class="field"><label class="lab" for="g-term">기간 (개월)</label><input class="input" id="g-term" inputmode="numeric" value="${f.term || ''}" placeholder="예: 12"></div><div class="field"><label class="lab" for="g-rate">연 이자율 (%)</label><input class="input" id="g-rate" inputmode="decimal" value="${esc(f.rate)}" placeholder="예: 3.5"></div></div>
+    <div class="field-row"><div class="field"><label class="lab" for="g-start">가입일 (첫 납입)</label><input class="input" type="date" id="g-start" value="${f.start}"></div><div class="field"><label class="lab" for="g-day">매달 납입일</label><select class="input" id="g-day">${range(1, 31).map(d => `<option value="${d}"${d === f.day ? ' selected' : ''}>${d}일</option>`).join('')}</select></div></div>
+    <label class="check"><input type="checkbox" id="g-auto"${f.auto ? ' checked' : ''}><span>납입일이 되면 넣은 것으로 자동 기록하기</span></label>`
+    : `
+    <div class="field"><label class="lab" for="g-target">목표 금액</label><div class="amt"><input id="g-target" inputmode="numeric" placeholder="0" value="${f.target ? fmt(f.target) : ''}"><span>원</span></div></div>
+    <div class="field-row"><div class="field"><label class="lab" for="g-start">시작일</label><input class="input" type="date" id="g-start" value="${f.start}"></div><div class="field"><label class="lab" for="g-end">목표일</label><input class="input" type="date" id="g-end" value="${f.end}"></div></div>`}
+    <p class="sheet-note" id="gPrev">${esc(goalPreview())}</p>
+    <div class="sheet-actions">${isEdit ? `<button class="btn btn-danger" type="button" data-act="g-delete">${icon('trash')}삭제</button>` : ''}<button class="btn btn-primary btn-block" type="submit" id="g-save" ${canSaveGoal() ? '' : 'disabled'}>${isEdit ? '고친 내용 저장' : '추가하기'}</button></div>
+  </form>`;
+}
+function refreshGoalSheet() {
+  const p = $('#gPrev'); if (p) p.textContent = goalPreview();
+  const s = $('#g-save'); if (s) s.disabled = !canSaveGoal();
+}
+function saveGoal() {
+  const f = F;
+  if (!canSaveGoal()) return;
+  const t = todayStr(), id = f.id || uid('g'), prev = f.id ? S.goals[f.id] : null;
+  const g = { name: f.name.trim().slice(0, 30), emoji: firstGrapheme(f.emoji), kind: f.kind, start: f.start, ex: !!f.ex,
+    target: f.kind === 'free' ? f.target : 0, end: f.kind === 'free' ? f.end : '', monthly: f.kind === 'saving' ? f.monthly : 0,
+    term: f.kind === 'saving' ? Math.min(600, Math.max(1, f.term | 0)) : 0, rate: f.kind === 'saving' ? Math.round((+f.rate || 0) * 1000) / 1000 : 0,
+    day: f.kind === 'saving' ? f.day : 0, auto: f.kind === 'saving' ? f.auto : false,
+    since: prev ? (prev.auto === false && f.auto && (prev.since || t) < t ? t : prev.since || t) : f.start < t ? f.start : t };
+  // a new 적금 started in the past backfills its payments (up to the auto-record window)
+  writeGoals({ [id]: prev ? g : { ...g, deposits: {} } });
+  closeSheet();
+  toast(f.id ? '고쳤어요' : `‘${g.name}’ 목표를 만들었어요`);
+  autoRecord();
+}
+function deleteGoal() {
+  const f = F, prev = S.goals[f.id];
+  closeSheet();
+  if (!prev) return;
+  writeGoals({ [f.id]: null });
+  toast('목표를 지웠어요', { undo: () => writeGoals({ [f.id]: prev }) });
+}
+/* deposit sheet */
+function openDepSheet(gid) {
+  const g = S.goals[gid];
+  if (!g || S.mode === 'denied') return;
+  F = { mode: 'dep', gid, kind: 'in', amount: g.kind === 'saving' ? g.monthly || 0 : 0, date: todayStr(), memo: '' };
+  showSheet(depSheet(), '#dep-amount');
+}
+function depSheet() {
+  const f = F, g = S.goals[f.gid] || {};
+  return `<form id="depForm" autocomplete="off" novalidate>
+    <div class="sheet-h"><h2 id="sheetTitle">${esc(g.name || '')}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    <div class="seg" role="group" aria-label="넣기·빼기" style="width:100%"><button type="button" id="dk-in" data-act="d-kind" data-v="in" ${pressed(f.kind === 'in')}>넣기</button><button type="button" id="dk-out" data-act="d-kind" data-v="out" ${pressed(f.kind === 'out')}>빼기</button></div>
+    <div class="field"><label class="lab" for="dep-amount">금액</label><div class="amt"><input id="dep-amount" inputmode="numeric" placeholder="0" value="${f.amount ? fmt(f.amount) : ''}"><span>원</span></div></div>
+    <div class="field-row"><div class="field"><label class="lab" for="dep-date">날짜</label><input class="input" type="date" id="dep-date" value="${f.date}"></div><div class="field"><label class="lab" for="dep-memo">메모 <span class="muted" style="font-weight:400">(선택)</span></label><input class="input" id="dep-memo" maxlength="30" placeholder="예: 보너스" value="${esc(f.memo)}"></div></div>
+    <div class="sheet-actions"><button class="btn btn-primary btn-block" type="submit" id="dep-save" ${f.amount > 0 ? '' : 'disabled'}>${f.kind === 'in' ? '넣기' : '빼기'}</button></div>
+  </form>`;
+}
+function saveDep() {
+  const f = F;
+  if (!(f.amount > 0) || !isYmd(f.date)) return;
+  const id = uid('d');
+  writeGoals({ [f.gid]: { deposits: { [id]: { date: f.date, amount: f.kind === 'in' ? f.amount : -f.amount, memo: f.memo.trim().slice(0, 30), auto: false, at: Date.now() } } } });
+  closeSheet();
+  toast(f.kind === 'in' ? `${won(f.amount)}을 넣었어요` : `${won(f.amount)}을 뺐어요`, { undo: () => writeGoals({ [f.gid]: { deposits: { [id]: null } } }) });
+}
+function openGoalHistory(gid) {
+  const g = S.goals[gid];
+  if (!g) return;
+  const s = goalStats({ ...g, id: gid });
+  F = { mode: 'view', gid };
+  showSheet(`<div class="day-sheet">
+    <div class="sheet-h"><h2 id="sheetTitle">${esc(g.name)} 모은 기록</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    <div class="day-sum"><div><span class="stat-l">모은 돈</span><span class="stat-v">${won(s.saved)}</span></div><div><span class="stat-l">목표</span><span class="stat-v">${won(s.target)}</span></div><div><span class="stat-l">기록</span><span class="stat-v">${s.deps.length}건</span></div></div>
+    ${s.deps.length ? `<div class="rank">${s.deps.map(d => `<div class="dep-row"><span class="emo" aria-hidden="true">${d.amount > 0 ? '＋' : '－'}</span><span class="tx-main"><span class="tx-title">${esc(d.memo || (d.amount > 0 ? '넣음' : '뺌'))}${d.auto ? '<span class="tag sub">자동</span>' : ''}</span><span class="tx-sub">${mdw(d.date)} ${d.date.slice(0, 4)}</span></span><span class="tx-amt${d.amount > 0 ? ' in' : ''}">${d.amount > 0 ? '+' : '−'}${won(Math.abs(d.amount))}</span><button class="icon-btn" type="button" data-act="dep-del" data-gid="${esc(gid)}" data-id="${esc(d.id)}" aria-label="이 기록 지우기">${icon('trash')}</button></div>`).join('')}</div>` : '<p class="muted cal-none">아직 넣은 기록이 없어요.</p>'}
+    <button class="btn btn-primary btn-block" type="button" data-act="goal-dep" data-id="${esc(gid)}">${icon('plus')}넣기·빼기</button>
+  </div>`);
+}
+function deleteDep(gid, id) {
+  const g = S.goals[gid], prev = g && g.deposits && g.deposits[id];
+  if (!prev) return;
+  writeGoals({ [gid]: { deposits: { [id]: null } } });
+  openGoalHistory(gid);
+  toast('기록을 지웠어요', { undo: () => { writeGoals({ [gid]: { deposits: { [id]: prev } } }); if (F && F.mode === 'view' && F.gid === gid) openGoalHistory(gid); } });
+}
+function autoRecordGoals(t, floor) {
+  const patch = {};
+  for (const g of goalsArr()) {
+    if (g.kind !== 'saving' || !g.auto || !(g.monthly > 0)) continue;
+    const since = isYmd(g.since) ? g.since : t, from = since > floor ? since : floor;
+    for (const s of savingSchedule(g)) {
+      if (s.date < from || s.date > t) continue;
+      const id = 'a_' + s.date.slice(0, 7).replace('-', '');
+      if ((g.deposits && id in g.deposits) || attempted.has(g.id + id)) continue;
+      attempted.add(g.id + id);
+      ((patch[g.id] ||= { deposits: {} }).deposits)[id] = { date: s.date, amount: g.monthly, memo: `${s.k}회차 자동 납입`, auto: true, at: parseD(s.date).getTime() + 9 * 36e5 };
+    }
+  }
+  if (Object.keys(patch).length) writeGoals(patch);
 }
 
 /* ================= toast ================= */
@@ -1717,6 +1980,9 @@ function onMoneyInput(el) {
   if (!F) return;
   if (el.id === 'f-amount') { F.amount = v; syncTxSheet(); }
   else if (el.id === 's-amount') { F.amount = v; $('#s-save').disabled = !canSaveSub(); }
+  else if (el.id === 'g-target') { F.target = v; refreshGoalSheet(); }
+  else if (el.id === 'g-monthly') { F.monthly = v; refreshGoalSheet(); }
+  else if (el.id === 'dep-amount') { F.amount = v; $('#dep-save').disabled = !(v > 0); }
   else if (el.id === 'l-principal') { F.principal = v; $('#lpHint').textContent = v >= 1e4 ? koreanWon(v) : ''; refreshLoanSheet(); }
   else if (el.id === 'b-total') { F.total = v; $('#bHint').textContent = budHint(); }
   else if (el.dataset.bcat) {
@@ -1774,6 +2040,14 @@ const ACT = {
   'toast-undo': () => { const u = toastUndo; hideToast(); if (u) u(); },
   ai: () => openAiSheet(),
   'day-open': el => openDaySheet(el.dataset.date),
+  'add-goal': () => openGoalSheet(null),
+  'edit-goal': el => openGoalSheet(el.dataset.id),
+  'goal-dep': el => openDepSheet(el.dataset.id),
+  'goal-hist': el => openGoalHistory(el.dataset.id),
+  'dep-del': el => deleteDep(el.dataset.gid, el.dataset.id),
+  'g-kind': el => { F.kind = el.dataset.v; rerenderSheet(goalSheet()); },
+  'g-delete': () => deleteGoal(),
+  'd-kind': el => { F.kind = el.dataset.v; rerenderSheet(depSheet()); },
   'open-cal': () => { S.listMode = 'cal'; S.selDay = null; prefs.listMode = 'cal'; savePrefs(); go('list'); },
   'add-loan': () => openLoanSheet(null),
   'edit-loan': el => openLoanSheet(el.dataset.id),
@@ -1815,14 +2089,23 @@ document.addEventListener('click', e => {
   if (!el || el.disabled) return;
   if (el.dataset.act) {
     const fn = ACT[el.dataset.act];
-    if (fn && (!el.dataset.act.match(/^[fsl]-/) || F)) { e.preventDefault(); fn(el, e); }
+    if (fn && (!el.dataset.act.match(/^[fsldg]-/) || F)) { e.preventDefault(); fn(el, e); }
   } else if (el.dataset.view) go(el.dataset.view);
 });
 document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'flt-q') { S.filter.q = el.value; updateListResults(); return; }
   if (el.id === 'ai-q') { S.aiDraft = el.value; return; }
-  if (el.id === 'f-amount' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
+  if (el.id === 'f-amount' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || el.id === 'g-target' || el.id === 'g-monthly' || el.id === 'dep-amount' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
+  if (F && F.mode === 'goal') {
+    if (el.id === 'g-name') F.name = el.value;
+    else if (el.id === 'g-emoji') F.emoji = el.value;
+    else if (el.id === 'g-rate') { const v = el.value.replace(/[^\d.]/g, ''); if (v !== el.value) el.value = v; F.rate = v; }
+    else if (el.id === 'g-term') { const v = el.value.replace(/\D/g, '').slice(0, 3); if (v !== el.value) el.value = v; F.term = +v || 0; }
+    refreshGoalSheet();
+    return;
+  }
+  if (F && F.mode === 'dep' && el.id === 'dep-memo') { F.memo = el.value; return; }
   if (F && F.mode === 'loan') {
     if (el.id === 'l-name') F.name = el.value;
     else if (el.id === 'l-lender') F.lender = el.value;
@@ -1855,6 +2138,11 @@ document.addEventListener('change', e => {
     case 'l-day': F.day = +el.value; rerenderSheet(loanSheet()); break;
     case 'l-auto': F.auto = el.checked; rerenderSheet(loanSheet()); break;
     case 'l-record': F.recordNow = el.checked; break;
+    case 'g-start': if (isYmd(el.value)) { F.start = el.value; refreshGoalSheet(); } break;
+    case 'g-end': if (isYmd(el.value)) { F.end = el.value; refreshGoalSheet(); } break;
+    case 'g-day': F.day = +el.value; refreshGoalSheet(); break;
+    case 'g-auto': F.auto = el.checked; break;
+    case 'dep-date': if (isYmd(el.value)) F.date = el.value; break;
     default: break;
   }
 });
@@ -1865,6 +2153,8 @@ document.addEventListener('submit', e => {
   else if (F.mode === 'sub') saveSub();
   else if (F.mode === 'budget') saveBudget();
   else if (F.mode === 'loan') saveLoan();
+  else if (F.mode === 'goal') saveGoal();
+  else if (F.mode === 'dep') saveDep();
   else if (F.mode === 'ai') { const q = $('#ai-q'); if (q) askAi(q.value); }
 });
 document.addEventListener('keydown', e => {

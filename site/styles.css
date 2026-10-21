@@ -124,7 +124,7 @@ h1, h2, h3, p { margin: 0; }
 .top-end { margin-left: auto; }
 #notice:not(:empty) { margin-bottom: 16px; }
 [data-o="1"] { order: 1; } [data-o="2"] { order: 2; } [data-o="3"] { order: 3; } [data-o="4"] { order: 4; }
-[data-o="5"] { order: 5; } [data-o="6"] { order: 6; } [data-o="7"] { order: 7; } [data-o="8"] { order: 8; }
+[data-o="5"] { order: 5; } [data-o="6"] { order: 6; } [data-o="7"] { order: 7; } [data-o="8"] { order: 8; } [data-o="9"] { order: 9; }
 @media (max-width: 420px) { .month-label .y.cur { display: none; } .top .brand small { display: none; } }
 
 @media (min-width: 960px) {
@@ -507,6 +507,15 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-varian
 .ai-intro { display: grid; gap: 12px; font-size: 14px; color: var(--ink-2); line-height: 1.6; }
 .ai-ex { white-space: normal; text-align: left; }
 .ai-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* ---------- savings goals ---------- */
+.view-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.goal-card { display: grid; gap: 14px; }
+.goal-meter { position: relative; }
+.goal-meter .plan-mark { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--ink); }
+.state.good { color: var(--accent); background: var(--accent-soft); }
+.dep-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto 38px; gap: 10px; align-items: center; padding: 6px 0; }
+.dep-row .emo { font-size: 16px; font-weight: 700; }
 
 /* ---------- loans ---------- */
 .loan-sum .stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
