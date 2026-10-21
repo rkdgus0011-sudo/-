@@ -1,0 +1,16 @@
+{
+  "name": "또박또박 가계부",
+  "short_name": "또박또박",
+  "description": "구독·지출·수입·대출을 정리하는 개인 가계부",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F2F5F3",
+  "theme_color": "#F2F5F3",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
