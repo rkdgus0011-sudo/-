@@ -25,6 +25,7 @@
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.2 12 3.5l8.5 6.7V19a1.5 1.5 0 0 1-1.5 1.5h-4.2v-5.8H9.2v5.8H5A1.5 1.5 0 0 1 3.5 19z"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.6" cy="6.5" r="1.2"/><circle cx="4.6" cy="12" r="1.2"/><circle cx="4.6" cy="17.5" r="1.2"/></symbol>
   <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 3l3.5 3.5L17 10"/><path d="M3.5 12v-2A3.5 3.5 0 0 1 7 6.5h13.5"/><path d="M7 21l-3.5-3.5L7 14"/><path d="M20.5 12v2a3.5 3.5 0 0 1-3.5 3.5H3.5"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20.5h16"/><path d="M7 17v-5M12 17V6.5M17 17V9.5"/></symbol>
   <symbol id="i-pie" viewBox="0 0 24 24"><path d="M11 4.1A8.5 8.5 0 1 0 19.9 13H11z"/><path d="M14 3.2a8.5 8.5 0 0 1 6.8 6.8H14z"/></symbol>
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -57,6 +58,7 @@
       <button class="nav-item" type="button" data-view="goals"><svg class="i" aria-hidden="true"><use href="#i-flag"/></svg>모으기</button>
       <button class="nav-item" type="button" data-view="loans"><svg class="i" aria-hidden="true"><use href="#i-bank"/></svg>대출</button>
       <button class="nav-item" type="button" data-view="credit"><svg class="i" aria-hidden="true"><use href="#i-won"/></svg>신용점수</button>
+      <button class="nav-item" type="button" data-view="stats"><svg class="i" aria-hidden="true"><use href="#i-chart"/></svg>통계</button>
       <button class="nav-item" type="button" data-view="budget"><svg class="i" aria-hidden="true"><use href="#i-pie"/></svg>예산</button>
       <button class="nav-item" type="button" data-view="settings"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>설정</button>
     </nav>
@@ -88,7 +90,7 @@
   <button class="tab-add" type="button" data-act="add" aria-label="기록하기"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg></button>
   <button class="tab" type="button" data-view="subs"><svg class="i" aria-hidden="true"><use href="#i-repeat"/></svg>구독</button>
   <button class="tab" type="button" data-view="goals" data-views="goals loans credit"><svg class="i" aria-hidden="true"><use href="#i-won"/></svg>자산</button>
-  <button class="tab" type="button" data-view="budget"><svg class="i" aria-hidden="true"><use href="#i-pie"/></svg>예산</button>
+  <button class="tab" type="button" data-view="stats" data-views="stats budget"><svg class="i" aria-hidden="true"><use href="#i-chart"/></svg>통계</button>
 </nav>
 
 <div class="sheet-wrap" id="sheetWrap" hidden>

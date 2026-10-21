@@ -31,7 +31,7 @@ const DEFAULT_METHODS = [
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const UNKNOWN_CAT = { id: '', name: '미분류', emoji: '🏷️', kind: 'out' };
 const BACKFILL_DAYS = 92; // auto-record never reaches further back than this
-const VIEW_NAMES = ['home', 'list', 'subs', 'goals', 'loans', 'credit', 'budget', 'settings'];
+const VIEW_NAMES = ['home', 'list', 'subs', 'goals', 'loans', 'credit', 'stats', 'budget', 'settings'];
 
 /* ================= utils ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -127,7 +127,7 @@ function normSettings(st) {
   const cats = Array.isArray(s.cats) && s.cats.length ? s.cats.filter(c => c && c.id && (c.kind === 'in' || c.kind === 'out')).map(c => ({ id: c.id, name: c.name || '이름 없음', emoji: c.emoji || '🏷️', kind: c.kind })) : DEFAULT_CATS;
   const methods = Array.isArray(s.methods) ? s.methods.filter(m => m && m.id).map(m => ({ id: m.id, name: m.name || '이름 없음' })) : DEFAULT_METHODS;
   const b = s.budget && typeof s.budget === 'object' ? s.budget : {};
-  const theme = ['forest', 'ocean', 'sunset', 'lavender', 'blossom', 'graphite'].includes(s.theme) ? s.theme : 'forest';
+  const theme = ['forest', 'ocean', 'sunset', 'lavender', 'blossom', 'graphite', 'hanji', 'citrus', 'sky', 'mintchoco', 'night', 'cocoa', 'wine', 'neon'].includes(s.theme) ? s.theme : 'forest';
   return { cats, methods, budget: { total: +b.total > 0 ? +b.total : 0, cats: { ...(b.cats || {}) } }, budgetEx: !!s.budgetEx, autoSubs: s.autoSubs !== false, theme };
 }
 const cfg = () => S.settings || normSettings(null);
@@ -437,7 +437,7 @@ function renderChrome() {
   for (const b of document.querySelectorAll('.nav [data-view], .tabbar [data-view]')) {
     if ((b.dataset.views || b.dataset.view).split(' ').includes(S.view)) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   }
-  $('#monthNav').hidden = !['home', 'list', 'budget'].includes(S.view);
+  $('#monthNav').hidden = !['home', 'list', 'stats', 'budget'].includes(S.view);
   const [y, m] = S.ym.split('-').map(Number);
   $('#monthLabel').innerHTML = `<span class="y${y === new Date().getFullYear() ? ' cur' : ''}">${y}년 </span>${m}월`;
   for (const b of document.querySelectorAll('[data-act="add"]')) b.disabled = S.mode === 'denied';
@@ -478,7 +478,7 @@ function typingInView() {
   const a = document.activeElement;
   return !!a && $view.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(button|checkbox|radio|range|submit)$/.test(a.type)));
 }
-const VIEWS = { home: vHome, list: vList, subs: vSubs, goals: vGoals, loans: vLoans, credit: vCredit, budget: vBudget, settings: vSettings };
+const VIEWS = { home: vHome, list: vList, subs: vSubs, goals: vGoals, loans: vLoans, credit: vCredit, stats: vStats, budget: vBudget, settings: vSettings };
 function renderView() {
   if (typingInView()) { deferred = true; return; } // never yank a field out from under the cursor
   deferred = false;
@@ -949,7 +949,7 @@ function vBudget() {
   const b = cfg().budget, bs = budgetSummary(ym, spent);
   const withB = catsOf('out').filter(c => +b.cats[c.id] > 0);
   const noB = Object.entries(by).filter(([id]) => !withB.some(c => c.id === id)).sort((p, q) => q[1] - p[1]);
-  const head = `<div class="view-h"><h1 class="view-title">${mLabel(ym)} 예산</h1><div class="view-acts"><button class="btn btn-ghost btn-sm" type="button" data-act="setup" ${S.mode === 'denied' ? 'disabled' : ''}>추천 받기</button><button class="btn btn-soft btn-sm" type="button" data-act="edit-budget" ${S.mode === 'denied' ? 'disabled' : ''}>예산 편집</button></div></div>`;
+  const head = `<div class="view-switch">${statsSwitch('budget')}</div><div class="view-h"><h1 class="view-title">${mLabel(ym)} 예산</h1><div class="view-acts"><button class="btn btn-ghost btn-sm" type="button" data-act="setup" ${S.mode === 'denied' ? 'disabled' : ''}>추천 받기</button><button class="btn btn-soft btn-sm" type="button" data-act="edit-budget" ${S.mode === 'denied' ? 'disabled' : ''}>예산 편집</button></div></div>`;
   if (!bs) {
     return head + `<section class="card">${emptyBox('아직 예산이 없어요', '한 달 전체 예산이나 카테고리별 예산을 정하면 얼마나 남았는지 바로 보여 드려요. 수입만 알려 주면 추천해 드릴 수도 있어요.', `<div class="welcome-acts" style="justify-content:center"><button class="btn btn-primary btn-sm" type="button" data-act="setup">첫 설정 도우미</button><button class="btn btn-soft btn-sm" type="button" data-act="edit-budget">직접 정하기</button></div>`)}</section>`;
   }
@@ -1629,25 +1629,43 @@ function openSchedule(id) {
 
 /* ================= colour themes ================= */
 const THEMES = [
-  { id: 'forest', name: '숲', sw: ['#0C7F57', '#F2F5F3'] },
-  { id: 'ocean', name: '바다', sw: ['#0B6E8A', '#F0F5F7'] },
-  { id: 'sunset', name: '노을', sw: ['#B9461A', '#F7F3F0'] },
-  { id: 'lavender', name: '라벤더', sw: ['#6544C4', '#F4F3F9'] },
-  { id: 'blossom', name: '벚꽃', sw: ['#B4245F', '#F9F2F5'] },
-  { id: 'graphite', name: '먹', sw: ['#374151', '#F3F4F5'] },
+  { id: 'forest', name: '숲', mode: 'auto', bg: '#F2F5F3', surface: '#FFFFFF', accent: '#0C7F57', ink: '#17201C', dk: ['#0E1311', '#161C19', '#34B382'] },
+  { id: 'ocean', name: '바다', mode: 'auto', bg: '#F0F5F7', surface: '#FFFFFF', accent: '#0B6E8A', ink: '#17201C', dk: ['#0C1316', '#141C20', '#3CB4D3'] },
+  { id: 'sunset', name: '노을', mode: 'auto', bg: '#F7F3F0', surface: '#FFFFFF', accent: '#B9461A', ink: '#17201C', dk: ['#15110F', '#1D1815', '#F58A55'] },
+  { id: 'lavender', name: '라벤더', mode: 'auto', bg: '#F4F3F9', surface: '#FFFFFF', accent: '#6544C4', ink: '#17201C', dk: ['#111018', '#18171F', '#A68CF6'] },
+  { id: 'blossom', name: '벚꽃', mode: 'auto', bg: '#F9F2F5', surface: '#FFFFFF', accent: '#B4245F', ink: '#17201C', dk: ['#161013', '#1E171A', '#F17AAE'] },
+  { id: 'graphite', name: '먹', mode: 'auto', bg: '#F3F4F5', surface: '#FFFFFF', accent: '#374151', ink: '#17201C', dk: ['#0F1113', '#17191C', '#B8C2CF'] },
+  { id: 'hanji', name: '한지', mode: 'light', bg: '#F1ECE2', surface: '#FBF8F2', accent: '#2E4A7D', ink: '#29241D' },
+  { id: 'citrus', name: '감귤', mode: 'light', bg: '#FFF4E6', surface: '#FFFFFF', accent: '#B0500E', ink: '#2A1C10' },
+  { id: 'sky', name: '하늘', mode: 'light', bg: '#EBF1FB', surface: '#FFFFFF', accent: '#2B4FCF', ink: '#131A2C' },
+  { id: 'mintchoco', name: '민트초코', mode: 'light', bg: '#E1F3EE', surface: '#FBFEFD', accent: '#6A3E2A', ink: '#2B1D17' },
+  { id: 'night', name: '밤하늘', mode: 'dark', bg: '#0A0F1F', surface: '#121A2E', accent: '#F2C35A', ink: '#E9EDF8' },
+  { id: 'cocoa', name: '코코아', mode: 'dark', bg: '#15100D', surface: '#1F1814', accent: '#E7A867', ink: '#F4EBE3' },
+  { id: 'wine', name: '와인', mode: 'dark', bg: '#170B12', surface: '#22111B', accent: '#FF8DB3', ink: '#F7E8EF' },
+  { id: 'neon', name: '네온', mode: 'dark', bg: '#0C0A18', surface: '#151226', accent: '#34E0F0', ink: '#EEEAFF' },
 ];
 function applyTheme(id) {
   const ok = THEMES.some(x => x.id === id) ? id : 'forest';
   if (ok === 'forest') document.documentElement.removeAttribute('data-pal');
   else document.documentElement.setAttribute('data-pal', ok);
+  const th = THEMES.find(x => x.id === ok);
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m => { if (m.dataset.orig == null) m.dataset.orig = m.content; m.content = th.mode === 'auto' ? m.dataset.orig : th.bg; });
   if (prefs.theme !== ok) { prefs.theme = ok; savePrefs(); }
 }
+function themeOpt(x, cur) {
+  return `<button class="theme-opt" type="button" role="radio" id="th-${x.id}" data-act="theme" data-id="${x.id}" aria-checked="${cur === x.id}"><span class="theme-prev" aria-hidden="true" style="background:${x.bg}"><i style="background:${x.surface}"><b style="background:${x.accent}"></b><s style="background:${x.ink}"></s></i>${x.dk ? `<span class="theme-dk" style="background:${x.dk[0]}"><i style="background:${x.dk[1]}"><b style="background:${x.dk[2]}"></b><s style="background:#ECF1EE"></s></i></span>` : ''}</span><span class="theme-n">${x.name}</span></button>`;
+}
 function themeCard() {
-  const cur = cfg().theme;
+  const cur = cfg().theme, grp = m => THEMES.filter(x => m.includes(x.mode)).map(x => themeOpt(x, cur)).join('');
   return `<section class="card">
     <div class="card-h"><h2 class="card-t">색상 테마</h2></div>
-    <div class="themes" role="radiogroup" aria-label="색상 테마">${THEMES.map(x => `<button class="theme-opt" type="button" role="radio" id="th-${x.id}" data-act="theme" data-id="${x.id}" aria-checked="${cur === x.id}"><span class="theme-sw" aria-hidden="true"><i style="background:${x.sw[0]}"></i><i style="background:${x.sw[1]}"></i></span>${x.name}</button>`).join('')}</div>
-    <p class="set-note" style="margin-top:12px">고른 테마는 계정에 저장돼서 다른 기기에서도 똑같이 보여요. 밝은 화면·어두운 화면은 기기 설정을 따라가요.</p>
+    <div role="radiogroup" aria-label="색상 테마">
+      <p class="theme-gt">기기 설정 따라가기 <span>밝은 화면·어두운 화면이 기기 설정에 맞춰 바뀌어요</span></p>
+      <div class="themes">${grp(['auto'])}</div>
+      <p class="theme-gt">늘 같은 색 <span>기기 설정과 상관없이 이 색 그대로 보여요</span></p>
+      <div class="themes">${grp(['light', 'dark'])}</div>
+    </div>
+    <p class="set-note" style="margin-top:12px">고른 테마는 계정에 저장돼서 다른 기기에서도 똑같이 보여요.</p>
   </section>`;
 }
 
@@ -2212,6 +2230,192 @@ function policyCard() {
   </section>`;
 }
 
+/* ================= 통계 ================= */
+const WD = ['월', '화', '수', '목', '금', '토', '일'];
+function statsSwitch(cur) {
+  return `<div class="seg" role="group" aria-label="통계·예산 화면"><button type="button" id="sv-stats" data-view="stats" aria-pressed="${cur === 'stats'}">통계</button><button type="button" id="sv-budget" data-view="budget" aria-pressed="${cur === 'budget'}">예산</button></div>`;
+}
+function statsData(ym) {
+  const t = todayStr(), curYm = ymOf(t), isCur = ym === curYm;
+  const days = isCur ? +t.slice(8) : daysIn(ym);
+  const list = txsOf(ym), outs = list.filter(x => x.kind === 'out'), tot = totals(list);
+  const prevYm = addMonths(ym, -1), prevAll = txsOf(prevYm).filter(x => x.kind === 'out');
+  const cut = isCur ? Math.min(+t.slice(8), daysIn(prevYm)) : 31;
+  const prevOuts = prevAll.filter(x => +x.date.slice(8) <= cut);
+  const hasPrev = prevAll.length > 0, prevOut = sum(prevOuts.map(x => x.amount));
+  const fixed = sum(outs.filter(x => x.sub || x.loan).map(x => x.amount));
+  const spentOn = new Set(outs.map(x => x.date));
+  let free = 0;
+  for (let d = 1; d <= days; d++) if (!spentOn.has(`${ym}-${pad(d)}`)) free++;
+  const by = {}, pby = {}, cnt = {};
+  for (const x of outs) { const k = x.cat || ''; by[k] = (by[k] || 0) + x.amount; cnt[k] = (cnt[k] || 0) + 1; }
+  for (const x of prevOuts) { const k = x.cat || ''; pby[k] = (pby[k] || 0) + x.amount; }
+  const cats = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([id, v]) => ({ id, v, n: cnt[id], d: hasPrev ? v - (pby[id] || 0) : null }));
+  const wSum = Array(7).fill(0), wCnt = Array(7).fill(0), wN = Array(7).fill(0);
+  for (let d = 1; d <= days; d++) wCnt[(parseD(`${ym}-${pad(d)}`).getDay() + 6) % 7]++;
+  for (const x of outs) { const w = (parseD(x.date).getDay() + 6) % 7; wSum[w] += x.amount; wN[w]++; }
+  const wAvg = wSum.map((v, i) => (wCnt[i] ? v / wCnt[i] : 0));
+  const months = [];
+  for (let i = 5; i >= 0; i--) { const m = addMonths(ym, -i), tt = totals(txsOf(m)); months.push({ ym: m, out: tt.out, in: tt.in }); }
+  const done = months.filter(m => m.out > 0 && m.ym < curYm);
+  const avg = done.length >= 2 ? sum(done.map(m => m.out)) / done.length : 0;
+  const fm = {};
+  for (const x of outs) {
+    const k = (x.memo || '').trim(); if (!k) continue;
+    if (!fm[k]) fm[k] = { k, n: 0, v: 0, cat: x.cat };
+    fm[k].n++; fm[k].v += x.amount;
+  }
+  const freq = Object.values(fm).filter(f => f.n >= 2).sort((a, b) => b.n - a.n || b.v - a.v).slice(0, 5);
+  const big = [...outs].sort((a, b) => b.amount - a.amount || byRecent(a, b)).slice(0, 3);
+  return { ym, isCur, days, tot, outs, prevYm, prevOut, hasPrev, fixed, free, cats, wAvg, wSum, wN, wCnt, months, avg, freq, big };
+}
+const share = (v, total) => { const p = total > 0 ? v / total * 100 : 0; return p > 0 && p < 1 ? '<1%' : Math.round(p) + '%'; };
+function statsSummary(D) {
+  const L = [];
+  if (D.hasPrev) {
+    const d = D.tot.out - D.prevOut, lab = D.isCur ? '지난달 이맘때보다' : '지난달보다';
+    L.push(d < 0 ? `${lab} <b>${won(-d)}</b> 덜 썼어요.` : d > 0 ? `${lab} <b>${won(d)}</b> 더 썼어요.` : `${D.isCur ? '지난달 이맘때와' : '지난달과'} 똑같이 썼어요.`);
+  }
+  if (D.cats.length) {
+    const c = catOf(D.cats[0].id);
+    L.push(`${esc(c.emoji)} <b>${esc(josa(c.name, '이/가'))}</b> 전체의 ${share(D.cats[0].v, D.tot.out)}로 가장 커요.`);
+  }
+  if (D.outs.length >= 5) {
+    const w = D.wAvg.indexOf(Math.max(...D.wAvg));
+    L.push(`<b>${WD[w]}요일</b>에 가장 많이 써요. 하루 평균 ${won(D.wAvg[w])}이에요.`);
+  }
+  if (D.fixed > 0) L.push(`구독·대출 같은 고정비가 지출의 ${share(D.fixed, D.tot.out)}예요.`);
+  return L;
+}
+/* column chart: one series, emphasis on one column, value label only on the emphasised one */
+function colChart(id, label, cols, opt) {
+  const max = Math.max(1, ...cols.map(c => c.v), opt.ref || 0) * 1.08;
+  const ref = opt.ref > 0 ? `<span class="cc-ref" style="bottom:${(opt.ref / max * 100).toFixed(2)}%"><em>${esc(opt.refLabel)}</em></span>` : '';
+  return `<div class="cc" id="${id}" role="group" aria-label="${esc(label)}">
+    <div class="cc-plot">${ref}${cols.map(c => {
+      const h = c.v > 0 ? Math.max(1.5, c.v / max * 100) : 0;
+      return `<button type="button" class="cc-col${c.on ? ' on' : ''}" data-tip-t="${esc(c.tipT)}" data-tip-r="${esc(JSON.stringify(c.rows))}" aria-label="${esc(c.aria)}"><span class="cc-bar" style="height:${h.toFixed(2)}%">${c.on && c.v > 0 ? `<em>${compact(c.v)}</em>` : ''}</span></button>`;
+    }).join('')}</div>
+    <div class="cc-x" aria-hidden="true">${cols.map(c => `<span${c.on ? ' class="on"' : ''}>${esc(c.x)}</span>`).join('')}</div>
+    <div class="tip" hidden></div>
+  </div>`;
+}
+function ccTip(col) {
+  const host = col.closest('.cc'), tip = host && host.querySelector('.tip');
+  if (!tip) return;
+  host.querySelectorAll('.cc-col.hov').forEach(x => x.classList.remove('hov'));
+  col.classList.add('hov');
+  tip.textContent = '';
+  const h = document.createElement('p'); h.className = 'tip-d'; h.textContent = col.dataset.tipT; tip.appendChild(h);
+  let rows = []; try { rows = JSON.parse(col.dataset.tipR || '[]'); } catch (e) { /* ignore */ }
+  for (const [n, v] of rows) {
+    const r = document.createElement('div'); r.className = 'tip-r';
+    const a = document.createElement('span'); a.className = 'n'; a.textContent = n;
+    const b = document.createElement('span'); b.className = 'v'; b.textContent = v;
+    r.append(a, b); tip.appendChild(r);
+  }
+  tip.hidden = false;
+  const hr = host.getBoundingClientRect(), cr = col.getBoundingClientRect(), tw = tip.offsetWidth;
+  let left = cr.left - hr.left + cr.width / 2 - tw / 2;
+  left = Math.max(0, Math.min(left, hr.width - tw));
+  tip.style.left = left + 'px';
+}
+function ccHide(host) {
+  if (!host) return;
+  host.querySelectorAll('.cc-col.hov').forEach(x => x.classList.remove('hov'));
+  const tip = host.querySelector('.tip'); if (tip) tip.hidden = true;
+}
+document.addEventListener('pointerover', e => { const c = e.target.closest && e.target.closest('.cc-col'); if (c) ccTip(c); });
+document.addEventListener('pointerout', e => { const h = e.target.closest && e.target.closest('.cc'); if (h && !h.contains(e.relatedTarget) && !h.contains(document.activeElement)) ccHide(h); });
+document.addEventListener('focusin', e => { const c = e.target.closest && e.target.closest('.cc-col'); if (c) ccTip(c); });
+document.addEventListener('focusout', e => { const h = e.target.closest && e.target.closest('.cc'); if (h && !h.contains(e.relatedTarget)) ccHide(h); });
+
+function vStats() {
+  const ym = S.ym, top = `<div class="view-switch">${statsSwitch('stats')}</div>`;
+  const head = `${top}<div class="view-h"><h1 class="view-title">${mLabel(ym)} 통계</h1></div>`;
+  if (isLoading()) return head + `<section class="card">${emptyBox('불러오는 중이에요', '')}</section>`;
+  if (ym > ymOf(todayStr())) return head + `<section class="card">${emptyBox('아직 시작하지 않은 달이에요', '이번 달로 돌아가면 지금까지의 통계를 볼 수 있어요.', `<button class="btn btn-soft btn-sm" type="button" data-act="month-now">이번 달 보기</button>`)}</section>`;
+  const D = statsData(ym);
+  if (!D.outs.length && !D.tot.in) return head + `<section class="card">${emptyBox(`${mLabel(ym)} 기록이 아직 없어요`, '지출을 몇 건만 적어도 어디에 많이 쓰는지, 무슨 요일에 많이 쓰는지 정리해 드려요.', `<button class="btn btn-primary btn-sm" type="button" data-act="add">${icon('plus')}기록하기</button>`)}</section>`;
+  const T = S.stTables || {};
+  const lines = statsSummary(D);
+  const hero = `<section class="card st-hero">
+    <p class="hero-label">${mLabel(ym)} 지출${D.isCur ? ' · 오늘까지' : ''}</p>
+    <p class="hero-num">${fmt(D.tot.out)}<span class="u">원</span></p>
+    ${lines.length ? `<ul class="st-sum">${lines.map(l => `<li>${l}</li>`).join('')}</ul>` : ''}
+  </section>`;
+  const rate = D.tot.in > 0 ? (D.tot.in - D.tot.out) / D.tot.in : null;
+  const kpi = `<section class="card"><div class="kpi">
+    <div><span class="stat-l">하루 평균 지출</span><span class="kpi-v">${won(D.tot.out / D.days)}</span><span class="kpi-s">${D.days}일 기준</span></div>
+    <div><span class="stat-l">저축률</span><span class="kpi-v">${rate == null ? '–' : (rate < 0 ? '−' : '') + Math.round(Math.abs(rate) * 100) + '%'}</span><span class="kpi-s">${rate == null ? '수입을 적으면 보여요' : rate < 0 ? '수입보다 더 썼어요' : '수입 중 남긴 돈'}</span></div>
+    <div><span class="stat-l">지출 없는 날</span><span class="kpi-v">${D.free}<small>일</small></span><span class="kpi-s">${D.days}일 중</span></div>
+    <div><span class="stat-l">고정비 비중</span><span class="kpi-v">${D.tot.out ? share(D.fixed, D.tot.out) : '–'}</span><span class="kpi-s">구독·대출 ${won(D.fixed)}</span></div>
+  </div></section>`;
+
+  const trendCols = D.months.map(m => ({
+    v: m.out, on: m.ym === ym, x: `${+m.ym.slice(5)}월`, tipT: mLabel(m.ym),
+    rows: [['지출', won(m.out)], ['수입', won(m.in)]], aria: `${mLabel(m.ym)} 지출 ${won(m.out)}, 수입 ${won(m.in)}`,
+  }));
+  const trend = `<section class="card">
+    <div class="card-h"><h2 class="card-t">최근 6개월 지출</h2><button class="card-link" type="button" data-act="st-table" data-k="trend">${T.trend ? '그래프로 보기' : '표로 보기'}</button></div>
+    ${T.trend ? `<div class="tbl-wrap"><table class="tbl"><caption class="sr-only">최근 6개월 지출과 수입</caption><thead><tr><th scope="col">달</th><th scope="col">지출</th><th scope="col">수입</th></tr></thead><tbody>${D.months.map(m => `<tr><td>${mLabel(m.ym)}</td><td>${won(m.out)}</td><td>${won(m.in)}</td></tr>`).join('')}</tbody></table></div>`
+      : colChart('st-trend', '최근 6개월 지출', trendCols, { ref: D.avg, refLabel: `월평균 ${compact(D.avg)}` })}
+    <p class="bud-foot">${D.avg ? `지난 달들의 월평균은 <b>${won(D.avg)}</b>이에요.` : '두 달 이상 기록이 쌓이면 월평균을 함께 보여 드려요.'}</p>
+  </section>`;
+
+  const wMax = Math.max(...D.wAvg), wTop = D.outs.length ? D.wAvg.indexOf(wMax) : -1;
+  const weekCols = WD.map((w, i) => ({
+    v: D.wAvg[i], on: i === wTop, x: w, tipT: `${w}요일`,
+    rows: [['하루 평균', won(D.wAvg[i])], ['합계', `${won(D.wSum[i])} · ${D.wN[i]}건`]], aria: `${w}요일 하루 평균 ${won(D.wAvg[i])}`,
+  }));
+  const week = `<section class="card">
+    <div class="card-h"><h2 class="card-t">요일별 하루 평균</h2><button class="card-link" type="button" data-act="st-table" data-k="week">${T.week ? '그래프로 보기' : '표로 보기'}</button></div>
+    ${T.week ? `<div class="tbl-wrap"><table class="tbl"><caption class="sr-only">요일별 지출</caption><thead><tr><th scope="col">요일</th><th scope="col">하루 평균</th><th scope="col">합계</th><th scope="col">건수</th></tr></thead><tbody>${WD.map((w, i) => `<tr><td>${w}요일</td><td>${won(D.wAvg[i])}</td><td>${won(D.wSum[i])}</td><td>${D.wN[i]}</td></tr>`).join('')}</tbody></table></div>`
+      : colChart('st-week', '요일별 하루 평균 지출', weekCols, {})}
+    <p class="bud-foot">${wTop >= 0 ? `<b>${WD[wTop]}요일</b>에 가장 많이 써요. 그날만 조금 줄여도 효과가 커요.` : '지출을 적으면 무슨 요일에 많이 쓰는지 알려 드려요.'}</p>
+  </section>`;
+
+  const maxC = D.cats.length ? D.cats[0].v : 1;
+  const cats = `<section class="card">
+    <div class="card-h"><h2 class="card-t">카테고리별 지출</h2><span class="muted" style="font-size:13px">${D.hasPrev ? (D.isCur ? '지난달 이맘때와 비교' : '지난달과 비교') : `${D.outs.length}건`}</span></div>
+    ${D.cats.length ? `<div class="rank">${D.cats.map(c => {
+      const k = catOf(c.id);
+      const dl = c.d == null ? `${c.n}건` : c.d > 0 ? `<span class="dlt up">▲ ${won(c.d)}</span>` : c.d < 0 ? `<span class="dlt down">▼ ${won(-c.d)}</span>` : '<span class="dlt">변화 없음</span>';
+      return `<button class="rank-row" type="button" data-act="filter-cat" data-cat="${esc(c.id)}" aria-label="${esc(k.name)} ${won(c.v)}, 내역 보기">
+        <span class="emo" aria-hidden="true">${esc(k.emoji)}</span>
+        <span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(k.name)}</span><span class="rank-amt">${won(c.v)}</span></span><span class="bar"><span style="width:${(c.v / maxC * 100).toFixed(1)}%"></span></span><span class="rank-sub">${dl}</span></span>
+        <span class="rank-pct">${share(c.v, D.tot.out)}</span></button>`;
+    }).join('')}</div>` : emptyBox('지출이 아직 없어요', '')}
+  </section>`;
+
+  const fx = D.tot.out ? D.fixed / D.tot.out : 0;
+  const split = `<section class="card">
+    <div class="card-h"><h2 class="card-t">고정비와 생활비</h2></div>
+    <div class="split" role="img" aria-label="고정비 ${share(D.fixed, D.tot.out)}, 생활비 ${share(D.tot.out - D.fixed, D.tot.out)}">${fx > 0 ? `<span class="s-fix" style="flex:${fx.toFixed(4)}"></span>` : ''}${fx < 1 ? `<span class="s-var" style="flex:${(1 - fx).toFixed(4)}"></span>` : ''}</div>
+    <div class="split-leg">
+      <div><i class="k fix"></i><span class="n">고정비 <small>구독·대출</small></span><b>${won(D.fixed)}</b><span class="muted">${share(D.fixed, D.tot.out)}</span></div>
+      <div><i class="k var"></i><span class="n">생활비 <small>그 밖의 지출</small></span><b>${won(D.tot.out - D.fixed)}</b><span class="muted">${share(D.tot.out - D.fixed, D.tot.out)}</span></div>
+    </div>
+    <p class="bud-foot">고정비는 매달 저절로 나가는 돈이에요. 안 쓰는 구독을 정리하면 생활비를 더 쓸 수 있어요.</p>
+  </section>`;
+
+  const freq = `<section class="card">
+    <div class="card-h"><h2 class="card-t">자주 쓴 곳</h2></div>
+    ${D.freq.length ? `<div class="rank">${D.freq.map((f, i) => `<button class="rank-row freq" type="button" data-act="st-search" data-q="${esc(f.k)}" aria-label="${esc(f.k)} ${f.n}번 ${won(f.v)}, 내역 보기">
+      <span class="emo num" aria-hidden="true">${i + 1}</span>
+      <span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(f.k)}</span><span class="rank-amt">${won(f.v)}</span></span><span class="rank-sub">${esc(catOf(f.cat).name)} · ${f.n}번</span></span>
+      <span class="rank-pct">${icon('right')}</span></button>`).join('')}</div>`
+      : emptyBox('아직 두 번 이상 쓴 곳이 없어요', '메모에 가게 이름을 적어 두면 자주 가는 곳을 모아 드려요.')}
+  </section>`;
+
+  const big = `<section class="card">
+    <div class="card-h"><h2 class="card-t">가장 큰 지출</h2></div>
+    ${D.big.length ? `<div class="rank">${D.big.map(txRow).join('')}</div>` : emptyBox('지출이 아직 없어요', '')}
+  </section>`;
+
+  return head + hero + kpi + `<div class="cols"><div class="col">${trend}${week}${split}</div><div class="col">${cats}${freq}${big}</div></div>`;
+}
+
 /* ================= toast ================= */
 let toastTimer = 0, toastUndo = null;
 function toast(msg, opts = {}) {
@@ -2331,6 +2535,8 @@ const ACT = {
   'restore-pick': () => { const i = $('#restoreFile'); if (i) { i.value = ''; i.click(); } },
   'restore-yes': () => { applyRestore(); renderView(); },
   'restore-no': () => { S.restore = null; renderView(); },
+  'st-table': el => { S.stTables = { ...(S.stTables || {}), [el.dataset.k]: !(S.stTables || {})[el.dataset.k] }; renderView(); },
+  'st-search': el => { S.filter = { kind: 'out', cat: '', method: '', q: el.dataset.q || '' }; S.listMode = 'list'; go('list'); },
   'leave-ask': () => { S.leave = {}; renderView(); const i = $('#leaveWord'); if (i) { i.scrollIntoView({ block: 'center' }); i.focus(); } },
   'leave-no': () => { S.leave = null; renderView(); },
   'leave-yes': () => { if (window.ttbPlatform && window.ttbPlatform.deleteAccount && !(S.leave && S.leave.busy)) leaveAccount(); },
