@@ -1,9 +1,9 @@
-/* 또박또박 가계부 · 웹 버전 플랫폼 계층
+/* 꼬박꼬박 가계부 · 웹 버전 플랫폼 계층
    - Supabase로 로그인(이메일·비밀번호, 구글)하고
    - 가계부 화면(app.js)이 쓰는 저장소 API(db·user·downloads)를 Supabase 위에 만들어 줘요. */
 (() => {
 'use strict';
-const VERSION = '1.0.0';
+const VERSION = '1.1.1';
 const CFG = window.TTB_CONFIG || {};
 const TABLE = 'ledger_docs';
 const $ = s => document.querySelector(s);
@@ -38,7 +38,7 @@ function koError(e) {
 }
 function renderAuth() {
   const card = (title, sub, body) => `<div class="auth-card">
-    <p class="brand"><b>또박또박</b><small>가계부</small></p>
+    <p class="brand"><b>꼬박꼬박</b><small>가계부</small></p>
     <h1 class="auth-title">${title}</h1>${sub ? `<p class="auth-sub">${sub}</p>` : ''}${body}</div>`;
   const google = CFG.googleLogin !== false ? `<button class="btn btn-soft btn-block" type="button" data-auth="google">구글 계정으로 계속하기</button><p class="auth-or">또는 이메일로</p>` : '';
   let html;

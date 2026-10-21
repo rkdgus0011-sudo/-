@@ -1,6 +1,6 @@
 {
-  "name": "또박또박 가계부",
-  "short_name": "또박또박",
+  "name": "꼬박꼬박 가계부",
+  "short_name": "꼬박꼬박",
   "description": "구독·지출·수입·대출을 정리하는 개인 가계부",
   "lang": "ko",
   "start_url": "./",

@@ -526,7 +526,10 @@ function vHome() {
         <li>${icon('repeat')}<span><b>구독</b>결제일이 되면 내역에 자동으로 기록</span></li>
       </ul>
       <div class="welcome-acts"><button class="btn btn-primary" type="button" data-act="add" ${isLoading() ? 'disabled' : ''}>${icon('plus')}첫 기록 남기기</button><button class="btn btn-soft" type="button" data-act="add-sub" ${isLoading() ? 'disabled' : ''}>구독 등록하기</button></div>
-    </section>`;
+    </section>${isLoading() ? '' : `<section class="card">
+      <div class="card-h"><h2 class="card-t">${mLabel(ym)} 달력</h2></div>
+      ${calGrid(ym, [], { idp: 'hcal', act: 'day-open', sel: null, compact: true })}
+    </section>`}`;
   }
   const list = txsOf(ym), tot = totals(list);
   const prevYm = addMonths(ym, -1), prev = txsOf(prevYm);
@@ -578,7 +581,7 @@ function vHome() {
     const v = sum(rest.map(r => r[1]));
     return `<div class="rank-row"><span class="emo" aria-hidden="true">⋯</span><span class="rank-main"><span class="rank-line"><span class="rank-name">그 외 ${rest.length}개</span><span class="rank-amt">${won(v)}</span></span><span class="bar"><span style="width:${(v / maxC * 100).toFixed(1)}%"></span></span></span><span class="rank-pct">${pct(v)}</span></div>`;
   })() : '');
-  const cats = `<section class="card" data-o="3">
+  const cats = `<section class="card" data-o="4">
     <div class="card-h"><h2 class="card-t">어디에 썼을까</h2>${outs.length ? `<span class="muted" style="font-size:13px">${outs.length}건</span>` : ''}</div>
     ${outs.length ? `<div class="rank">${catRows}</div>` : emptyBox(`${mLabel(ym)} 지출이 아직 없어요`, '지출을 기록하면 카테고리별로 모아서 보여 드려요.')}
   </section>`;
@@ -586,7 +589,7 @@ function vHome() {
   const ups = upcoming(30, 4);
   const monthEnd = `${curYm}-${pad(daysIn(curYm))}`;
   const restThisMonth = sum(subsArr().filter(s => s.active && s.amount > 0).map(s => { const d = nextOcc(s, addDays(t, 1)); return d <= monthEnd ? s.amount : 0; }));
-  const upc = `<section class="card" data-o="4">
+  const upc = `<section class="card" data-o="5">
     <div class="card-h"><h2 class="card-t">다가오는 정기결제</h2><button class="card-link" type="button" data-view="subs">전체${icon('right')}</button></div>
     ${ups.length ? `<div class="rank">${ups.map(({ s, d }) => { const m = methodOf(s.method); return `<button class="sub-row" type="button" data-act="edit-sub" data-id="${esc(s.id)}">
         <span class="emo" aria-hidden="true">${esc(s.emoji || catOf(s.cat).emoji)}</span>
@@ -600,7 +603,7 @@ function vHome() {
   for (const x of outs) byM[x.method || ''] = (byM[x.method || ''] || 0) + x.amount;
   const mRanked = Object.entries(byM).sort((a, b) => b[1] - a[1]);
   const maxM = mRanked.length ? mRanked[0][1] : 1;
-  const meth = `<section class="card" data-o="6">
+  const meth = `<section class="card" data-o="7">
     <div class="card-h"><h2 class="card-t">결제수단별 지출</h2></div>
     ${mRanked.length ? `<div class="rank">${mRanked.map(([id, v]) => {
       const m = methodOf(id), name = m ? m.name : '결제수단 없음';
@@ -610,21 +613,26 @@ function vHome() {
   </section>`;
 
   const recentList = list.slice(0, 6);
-  const recent = `<section class="card" data-o="7">
+  const recent = `<section class="card" data-o="8">
     <div class="card-h"><h2 class="card-t">최근 기록</h2><button class="card-link" type="button" data-view="list">전체 보기${icon('right')}</button></div>
     ${recentList.length ? `<div class="rank">${recentList.map(txRow).join('')}</div>` : emptyBox(`${mLabel(ym)} 기록이 없어요`, '', `<button class="btn btn-soft btn-sm" type="button" data-act="add">${icon('plus')}기록하기</button>`)}
   </section>`;
 
   const P = paceData(ym);
   const anyPace = P.thisC.some(v => v > 0) || P.hasPrev;
-  const pace = `<section class="card" data-o="5">
+  const pace = `<section class="card" data-o="6">
     <div class="card-h"><h2 class="card-t">누적 지출</h2><div class="legend"><span><i class="key"></i>${mLabel(ym)}</span>${P.hasPrev ? `<span><i class="key prev"></i>${mLabel(P.prevYm)}</span>` : ''}${P.B > 0 ? '<span><i class="key bud"></i>예산</span>' : ''}</div></div>
     ${anyPace ? (S.showTable ? paceTable(P) : `<div class="chart" id="pace" tabindex="0" role="img" aria-label="${esc(paceSummary(P))}"></div>`) + `<div class="chart-foot"><button class="card-link" type="button" id="paceToggle" data-act="pace-table">${S.showTable ? '그래프로 보기' : '표로 보기'}</button></div>`
       : emptyBox('아직 그릴 지출이 없어요', '기록이 쌓이면 날마다 얼마나 썼는지 지난달과 비교해 그려 드려요.')}
   </section>`;
 
+  const calCard = `<section class="card" data-o="3">
+    <div class="card-h"><h2 class="card-t">${mLabel(ym)} 달력</h2><button class="card-link" type="button" data-act="open-cal">크게 보기${icon('right')}</button></div>
+    ${calGrid(ym, list, { idp: 'hcal', act: 'day-open', sel: null, compact: true })}
+  </section>`;
+
   return `<div class="cols">
-    <div class="col">${hero}${pace}${recent}</div>
+    <div class="col">${hero}${calCard}${pace}${recent}</div>
     <div class="col">${budget}${cats}${upc}${meth}</div>
   </div>`;
 }
@@ -803,25 +811,48 @@ function listView(all, list) {
     return `<div class="day"><div class="day-h"><b>${dayHead(g.date)}</b><span class="s">${tt.in ? `<span class="in-c">+${fmt(tt.in)}</span>` : ''}${tt.out ? `<span>−${fmt(tt.out)}</span>` : ''}</span></div>${g.items.map(txRow).join('')}</div>`;
   }).join('');
 }
-function calView(ym, list) {
+// month grid shared by the home card and the 내역 calendar: totals, heat and the day's top categories
+function calGrid(ym, list, o) {
   const first = parseD(ym + '-01').getDay(), n = daysIn(ym), t = todayStr();
   const by = {};
-  for (const x of list) { const d = +x.date.slice(8); const o = by[d] || (by[d] = { in: 0, out: 0 }); o[x.kind] += x.amount; }
-  const maxOut = Math.max(0, ...Object.values(by).map(o => o.out));
-  const sel = S.selDay && ymOf(S.selDay) === ym ? S.selDay : (ymOf(t) === ym ? t : null);
+  for (const x of list) {
+    const d = +x.date.slice(8), e = by[d] || (by[d] = { in: 0, out: 0, cats: {} });
+    e[x.kind] += x.amount;
+    if (x.kind === 'out') e.cats[x.cat || ''] = (e.cats[x.cat || ''] || 0) + x.amount;
+  }
+  const maxOut = Math.max(0, ...Object.values(by).map(e => e.out));
   let cells = DOW.map((d, i) => `<div class="cal-dow${i === 0 ? ' sun' : i === 6 ? ' sat' : ''}" aria-hidden="true">${d}</div>`).join('');
   for (let i = 0; i < first; i++) cells += '<div class="cal-cell blank" aria-hidden="true"></div>';
   for (let d = 1; d <= n; d++) {
-    const ds = `${ym}-${pad(d)}`, o = by[d];
-    const r = o && maxOut ? o.out / maxOut : 0;
+    const ds = `${ym}-${pad(d)}`, e = by[d];
+    const r = e && maxOut ? e.out / maxOut : 0;
     const heat = r === 0 ? '' : r <= 1 / 3 ? ' h1' : r <= 2 / 3 ? ' h2' : ' h3';
-    const label = `${+ym.slice(5)}월 ${d}일${ds === t ? ' 오늘' : ''}${o ? `${o.in ? `, 수입 ${won(o.in)}` : ''}${o.out ? `, 지출 ${won(o.out)}` : ''}` : ', 기록 없음'}`;
-    cells += `<button type="button" class="cal-cell${heat}${ds === t ? ' today' : ''}" id="cal-${d}" data-act="cal-day" data-date="${ds}" aria-pressed="${ds === sel}" aria-label="${label}"><span class="d">${d}</span>${o && o.in ? `<span class="ci">+${cellAmt(o.in)}</span>` : ''}${o && o.out ? `<span class="co">−${cellAmt(o.out)}</span>` : ''}</button>`;
+    const top = e ? Object.entries(e.cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c]) => catOf(c)) : [];
+    const label = `${+ym.slice(5)}월 ${d}일${ds === t ? ' 오늘' : ''}${e ? `${e.in ? `, 수입 ${won(e.in)}` : ''}${e.out ? `, 지출 ${won(e.out)}` : ''}${top.length ? ` (${top.map(c => c.name).join(', ')})` : ''}` : ', 기록 없음'}`;
+    cells += `<button type="button" class="cal-cell${heat}${ds === t ? ' today' : ''}" id="${o.idp}-${d}" data-act="${o.act}" data-date="${ds}" aria-pressed="${ds === o.sel}" aria-label="${esc(label)}"><span class="d">${d}</span>${top.length ? `<span class="ce" aria-hidden="true">${top.map(c => esc(c.emoji)).join('')}</span>` : ''}${e && e.in ? `<span class="ci">${amtPair('+', e.in)}</span>` : ''}${e && e.out ? `<span class="co">${amtPair('−', e.out)}</span>` : ''}</button>`;
   }
+  return `<div class="cal${o.compact ? ' compact' : ''}" role="group" aria-label="${+ym.slice(0, 4)}년 ${+ym.slice(5)}월 달력">${cells}</div>
+    <div class="cal-legend"><span>지출 적음</span><i class="h1"></i><i class="h2"></i><i class="h3"></i><span>많음</span>${o.compact ? '<span class="cal-hint">· 날짜를 누르면 그날 내역이 보여요</span>' : ''}</div>`;
+}
+// full and short forms; CSS shows the short one where cells are narrow
+const amtPair = (sign, n) => `<span class="a-full">${sign}${cellAmt(n)}</span><span class="a-short">${sign}${n >= 1e4 ? compact(n) : fmt(n)}</span>`;
+function calView(ym, list) {
+  const t = todayStr();
+  const sel = S.selDay && ymOf(S.selDay) === ym ? S.selDay : (ymOf(t) === ym ? t : null);
   const dayList = sel ? list.filter(x => x.date === sel) : [];
-  return `<div class="cal" role="group" aria-label="${+ym.slice(0, 4)}년 ${+ym.slice(5)}월 달력">${cells}</div>
-    <div class="cal-legend"><span>지출 적음</span><i class="h1"></i><i class="h2"></i><i class="h3"></i><span>많음</span></div>
-    ${sel ? `<div class="day cal-day"><div class="day-h"><b>${dayHead(sel)}</b><button class="card-link" type="button" data-act="add" data-date="${sel}">${icon('plus', 'sm')}이 날 기록</button></div>${dayList.length ? dayList.map(txRow).join('') : '<p class="muted cal-none">이 날은 기록이 없어요.</p>'}</div>` : ''}`;
+  return calGrid(ym, list, { idp: 'cal', act: 'cal-day', sel })
+    + (sel ? `<div class="day cal-day"><div class="day-h"><b>${dayHead(sel)}</b><button class="card-link" type="button" data-act="add" data-date="${sel}">${icon('plus', 'sm')}이 날 기록</button></div>${dayList.length ? dayList.map(txRow).join('') : '<p class="muted cal-none">이 날은 기록이 없어요.</p>'}</div>` : '');
+}
+function openDaySheet(date) {
+  if (!isYmd(date)) return;
+  const list = txsOf(ymOf(date)).filter(x => x.date === date), tt = totals(list);
+  F = { mode: 'day', date };
+  showSheet(`<div class="day-sheet">
+    <div class="sheet-h"><h2 id="sheetTitle">${mdLabel(date)} ${DOW[parseD(date).getDay()]}요일</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    <div class="day-sum"><div><span class="stat-l">수입</span><span class="stat-v${tt.in ? ' in-c' : ''}">${tt.in ? '+' + won(tt.in) : '0원'}</span></div><div><span class="stat-l">지출</span><span class="stat-v">${tt.out ? '−' + won(tt.out) : '0원'}</span></div><div><span class="stat-l">기록</span><span class="stat-v">${list.length}건</span></div></div>
+    ${list.length ? `<div class="rank">${list.map(txRow).join('')}</div>` : '<p class="muted cal-none">이 날은 기록이 없어요.</p>'}
+    <button class="btn btn-primary btn-block" type="button" data-act="add" data-date="${date}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}이 날 기록하기</button>
+  </div>`);
 }
 
 /* ---------- subscriptions ---------- */
@@ -849,7 +880,7 @@ function receipt(active, monthly) {
     <div class="rc-line rc-total"><span class="n">월 합계</span><span class="dots"></span><span class="v">${fmt(monthly)}원</span></div>
     <div class="rc-line"><span class="n">1년이면</span><span class="dots"></span><span class="v">${fmt(monthly * 12)}원</span></div>
     <div class="rc-bar" aria-hidden="true"></div>
-    <p class="rc-foot">또박또박 가계부</p>
+    <p class="rc-foot">꼬박꼬박 가계부</p>
   </div></div>`;
 }
 function vSubs() {
@@ -1181,7 +1212,7 @@ async function initAi() {
   try { sampleFn = await window.claude.use('sample'); } catch (e) { sampleFn = null; }
   renderChrome();
 }
-const AI_RULES = `너는 '또박또박 가계부' 앱 안에 있는 도우미야. 사용자의 요청을 읽고 가계부 기록을 추가·수정·삭제하거나 질문에 답해.
+const AI_RULES = `너는 가계부 앱 '꼬박꼬박 가계부' 안에 있는 도우미야. 사용자의 요청을 읽고 가계부 기록을 추가·수정·삭제하거나 질문에 답해.
 반드시 JSON 객체 하나로만 답해: {"reply": "사용자에게 보여 줄 짧은 한국어 답(존댓말, 1~3문장)", "actions": [ ... ]}
 actions에 넣을 수 있는 것:
 - {"type":"add_tx","date":"YYYY-MM-DD","kind":"out 또는 in","amount":정수,"cat":"카테고리 id","memo":"내용","method":"결제수단 id"}
@@ -1634,7 +1665,7 @@ function readRestore(file) {
       S.restore = { data: b, count, when: String(b.exportedAt || '').slice(0, 10).replace(/-/g, '.') || '알 수 없는 날' };
       renderView();
       const y = $('#rsYes'); if (y) y.focus();
-    } catch (e) { toast('또박또박 가계부 백업 파일이 아니에요'); }
+    } catch (e) { toast('꼬박꼬박 가계부 백업 파일이 아니에요'); }
   };
   fr.readAsText(file);
 }
@@ -1742,6 +1773,8 @@ const ACT = {
   },
   'toast-undo': () => { const u = toastUndo; hideToast(); if (u) u(); },
   ai: () => openAiSheet(),
+  'day-open': el => openDaySheet(el.dataset.date),
+  'open-cal': () => { S.listMode = 'cal'; S.selDay = null; prefs.listMode = 'cal'; savePrefs(); go('list'); },
   'add-loan': () => openLoanSheet(null),
   'edit-loan': el => openLoanSheet(el.dataset.id),
   'loan-sched': el => openSchedule(el.dataset.id),
@@ -1749,8 +1782,8 @@ const ACT = {
   'l-method': el => { F.method = el.dataset.id; for (const b of document.querySelectorAll('#sheet [data-act="l-method"]')) b.setAttribute('aria-pressed', String(b.dataset.id === F.method)); },
   'l-delete': () => deleteLoan(),
   theme: el => { applyTheme(el.dataset.id); saveSettings({ ...cfg(), theme: el.dataset.id }); },
-  'backup-json': () => saveFile(`또박또박가계부_백업_${todayStr()}.json`, JSON.stringify(backupData())),
-  'backup-csv': () => saveFile(`또박또박가계부_내역_${todayStr()}.csv`, csvData()),
+  'backup-json': () => saveFile(`꼬박꼬박가계부_백업_${todayStr()}.json`, JSON.stringify(backupData())),
+  'backup-csv': () => saveFile(`꼬박꼬박가계부_내역_${todayStr()}.csv`, csvData()),
   'restore-pick': () => { const i = $('#restoreFile'); if (i) { i.value = ''; i.click(); } },
   'restore-yes': () => { applyRestore(); renderView(); },
   'restore-no': () => { S.restore = null; renderView(); },
