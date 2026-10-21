@@ -124,7 +124,7 @@ h1, h2, h3, p { margin: 0; }
 .top-end { margin-left: auto; }
 #notice:not(:empty) { margin-bottom: 16px; }
 [data-o="1"] { order: 1; } [data-o="2"] { order: 2; } [data-o="3"] { order: 3; } [data-o="4"] { order: 4; }
-[data-o="5"] { order: 5; } [data-o="6"] { order: 6; } [data-o="7"] { order: 7; } [data-o="8"] { order: 8; } [data-o="9"] { order: 9; }
+[data-o="5"] { order: 5; } [data-o="6"] { order: 6; } [data-o="7"] { order: 7; } [data-o="8"] { order: 8; } [data-o="9"] { order: 9; } [data-o="10"] { order: 10; } [data-o="11"] { order: 11; }
 @media (max-width: 420px) { .month-label .y.cur { display: none; } .top .brand small { display: none; } }
 
 @media (min-width: 960px) {
@@ -508,6 +508,26 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-varian
 .ai-ex { white-space: normal; text-align: left; }
 .ai-note { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
+/* ---------- habits, report, setup, sms, credit ---------- */
+.habit-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.habit-row .sub { display: block; font-size: 12.5px; margin-top: 2px; }
+.habit-num { display: block; font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
+.habit-num small { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-left: 3px; letter-spacing: 0; }
+.habit-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.report-num { font-size: 24px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 8px; }
+.report-num .muted { font-size: 14px; font-weight: 500; letter-spacing: 0; }
+.report-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; color: var(--ink-2); line-height: 1.6; }
+.report-list b { color: var(--ink); }
+.cal-cell .cn { font-size: 10px; font-weight: 700; color: var(--accent); text-align: left; letter-spacing: -.3px; }
+.setup-plan { display: grid; gap: 12px; }
+.setup-cats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--ink-2); }
+.setup-cats b { color: var(--ink); font-weight: 600; }
+.sms-open { justify-self: start; color: var(--accent); }
+.sms-box textarea { font-size: 14px; resize: vertical; min-height: 88px; }
+.credit-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
+@media (max-width: 560px) { .credit-form { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .credit-form .btn { grid-column: 1 / -1; } }
+.policy-card { display: grid; gap: 10px; justify-items: start; }
+
 /* ---------- savings goals ---------- */
 .view-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .goal-card { display: grid; gap: 14px; }
@@ -562,6 +582,15 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-varian
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
+/* 약관 링크 · 회원 탈퇴 (웹) */
+.legal-row { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; font-size: 13px; }
+.legal-row a, .leave-link { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+.legal-row a:hover, .leave-link:hover { color: var(--ink); }
+.leave-link { margin-left: auto; }
+.btn-leave { background: var(--crit); color: #fff; }
+.btn-leave:hover:not(:disabled) { filter: brightness(.94); }
+.leave-err { color: var(--crit); font-size: 13px; margin-top: 6px; }
+
 /* ---------- web version: page base + sign-in screen ---------- */
 :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 body { margin: 0; }
@@ -579,3 +608,9 @@ img { max-width: 100%; }
 .auth-msg.ok { color: var(--accent); }
 .auth-links { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
 .auth-links button { color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; padding: 4px 0; }
+
+/* 약관 동의 · 약관 링크 */
+.auth-agree { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; line-height: 1.55; color: var(--ink-2); padding: 12px; border-radius: 12px; background: var(--surface-2); cursor: pointer; }
+.auth-agree input { width: 18px; height: 18px; margin: 1px 0 0; flex: none; accent-color: var(--accent); }
+.auth-agree a, .auth-legal a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.auth-legal { display: flex; justify-content: center; gap: 16px; margin-top: 18px; font-size: 12.5px; color: var(--muted); }

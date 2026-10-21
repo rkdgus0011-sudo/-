@@ -3,7 +3,8 @@
    - 가계부 화면(app.js)이 쓰는 저장소 API(db·user·downloads)를 Supabase 위에 만들어 줘요. */
 (() => {
 'use strict';
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
+const TERMS_VERSION = '2026-10-21'; // 약관·처리방침을 크게 바꾸면 날짜를 올려 다시 동의를 받아요
 const CFG = window.TTB_CONFIG || {};
 const TABLE = 'ledger_docs';
 const $ = s => document.querySelector(s);
@@ -37,12 +38,18 @@ function koError(e) {
   return '잠시 후 다시 시도해 주세요. (' + m + ')';
 }
 function renderAuth() {
+  const legal = `<p class="auth-legal"><a href="terms.html" target="_blank" rel="noopener">이용약관</a><a href="privacy.html" target="_blank" rel="noopener">개인정보 처리방침</a></p>`;
   const card = (title, sub, body) => `<div class="auth-card">
     <p class="brand"><b>꼬박꼬박</b><small>가계부</small></p>
-    <h1 class="auth-title">${title}</h1>${sub ? `<p class="auth-sub">${sub}</p>` : ''}${body}</div>`;
+    <h1 class="auth-title">${title}</h1>${sub ? `<p class="auth-sub">${sub}</p>` : ''}${body}${legal}</div>`;
+  const agreeBox = `<label class="auth-agree"><input type="checkbox" id="a-agree"><span><b>(필수)</b> 만 14세 이상이며 <a href="terms.html" target="_blank" rel="noopener">이용약관</a>과 <a href="privacy.html" target="_blank" rel="noopener">개인정보 처리방침</a>에 동의해요</span></label>`;
   const google = CFG.googleLogin !== false ? `<button class="btn btn-soft btn-block" type="button" data-auth="google">구글 계정으로 계속하기</button><p class="auth-or">또는 이메일로</p>` : '';
   let html;
-  if (!configured) {
+  if (mode === 'consent') {
+    html = card('약관 동의', '가계부를 쓰기 전에 한 번만 확인해 주세요.', `<form class="auth-form" id="authForm" novalidate>${agreeBox}
+      <button class="btn btn-primary btn-block" type="submit">동의하고 시작하기</button></form><p class="auth-msg" id="authMsg" role="alert"></p>
+      <div class="auth-links"><button type="button" data-auth="cancel-consent">동의하지 않고 나가기</button></div>`);
+  } else if (!configured) {
     html = card('서버 연결이 필요해요', '', `<p class="auth-sub">이 사이트의 <b>config.js</b>에 Supabase 프로젝트 주소와 공개 키(anon key)를 넣어야 로그인할 수 있어요. 함께 드린 안내서의 2단계를 따라 해 주세요.</p>`);
   } else if (mode === 'newpw') {
     html = card('새 비밀번호 정하기', '앞으로 쓸 비밀번호를 입력해 주세요.', `<form class="auth-form" id="authForm" novalidate>
@@ -58,6 +65,7 @@ function renderAuth() {
     html = card(signup ? '회원가입' : '로그인', signup ? '가입하면 폰과 PC 어디서나 같은 가계부를 쓸 수 있어요.' : '로그인하면 저장해 둔 가계부를 이어서 볼 수 있어요.', `${google}<form class="auth-form" id="authForm" novalidate>
       <label class="field"><span class="lab">이메일</span><input class="input" type="email" id="a-email" autocomplete="email" required></label>
       <label class="field"><span class="lab">비밀번호${signup ? ' <span class="muted" style="font-weight:400">(8자 이상)</span>' : ''}</span><input class="input" type="password" id="a-pw" autocomplete="${signup ? 'new-password' : 'current-password'}" required></label>
+      ${signup ? agreeBox : ''}
       <button class="btn btn-primary btn-block" type="submit">${signup ? '가입하기' : '로그인'}</button></form>
       <p class="auth-msg" id="authMsg" role="alert"></p>
       <div class="auth-links">${signup ? '<button type="button" data-auth="login">이미 계정이 있어요</button>' : '<button type="button" data-auth="signup">회원가입</button><button type="button" data-auth="reset">비밀번호를 잊었어요</button>'}</div>`);
@@ -70,6 +78,7 @@ authEl.addEventListener('click', async e => {
   const b = e.target.closest('[data-auth]');
   if (!b || busy) return;
   const a = b.dataset.auth;
+  if (a === 'cancel-consent') { busy = true; await sb.auth.signOut().catch(() => {}); busy = false; mode = 'login'; renderAuth(); return; }
   if (a === 'google') {
     busy = true; authMsg('구글로 이동하는 중이에요…', true);
     const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
@@ -93,7 +102,8 @@ authEl.addEventListener('submit', async e => {
     } else if (mode === 'signup') {
       if (!email || !pw) throw new Error('이메일과 비밀번호를 입력해 주세요.');
       if (pw.length < 8) throw new Error('Password should be at least 8 characters');
-      const { data, error } = await sb.auth.signUp({ email: email.trim(), password: pw, options: { emailRedirectTo: location.origin + location.pathname } });
+      if (!($('#a-agree') || {}).checked) throw new Error('약관에 동의해 주세요. 만 14세 이상만 가입할 수 있어요.');
+      const { data, error } = await sb.auth.signUp({ email: email.trim(), password: pw, options: { emailRedirectTo: location.origin + location.pathname, data: consentData() } });
       if (error) throw error;
       if (!data.session) { mode = 'login'; renderAuth(); authMsg(`${email.trim()}로 인증 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해 주세요.`, true); }
     } else if (mode === 'reset') {
@@ -101,6 +111,11 @@ authEl.addEventListener('submit', async e => {
       const { error } = await sb.auth.resetPasswordForEmail(email.trim(), { redirectTo: location.origin + location.pathname });
       if (error) throw error;
       authMsg('메일을 보냈어요. 메일의 링크를 눌러 새 비밀번호를 정해 주세요.', true);
+    } else if (mode === 'consent') {
+      if (!($('#a-agree') || {}).checked) throw new Error('약관에 동의해 주세요. 만 14세 이상만 쓸 수 있어요.');
+      const { data, error } = await sb.auth.updateUser({ data: consentData() });
+      if (error) throw error;
+      start(data.user);
     } else if (mode === 'newpw') {
       if (!pw || pw.length < 8) throw new Error('Password should be at least 8 characters');
       const { data, error } = await sb.auth.updateUser({ password: pw });
@@ -109,7 +124,7 @@ authEl.addEventListener('submit', async e => {
       start(data.user);
     }
   } catch (err) {
-    authMsg(/입력해 주세요/.test(err.message) ? err.message : koError(err));
+    authMsg(/입력해 주세요|동의해 주세요/.test(err.message) ? err.message : koError(err));
   } finally {
     busy = false;
     if (btn && document.contains(btn)) btn.disabled = false;
@@ -212,9 +227,20 @@ function downloads() {
 }
 
 /* ---------------- start ---------------- */
+function consentData() { return { terms_version: TERMS_VERSION, terms_agreed_at: new Date().toISOString(), age_14_plus: true }; }
+const hasConsent = user => { const m = (user && user.user_metadata) || {}; return m.terms_version === TERMS_VERSION && m.age_14_plus === true; };
+async function deleteAccount() {
+  const { error } = await sb.rpc('delete_my_account');
+  if (error) throw error;
+  try { localStorage.removeItem('ttb-prefs'); } catch (e) { /* ignore */ }
+  await sb.auth.signOut().catch(() => {});
+  location.replace(location.pathname + '#left');
+  location.reload();
+}
 let started = false;
 function start(user) {
   if (started || !user) return;
+  if (!hasConsent(user)) { mode = 'consent'; renderAuth(); return; }
   started = true;
   const meta = user.user_metadata || {};
   const name = meta.full_name || meta.name || '';
@@ -227,7 +253,7 @@ function start(user) {
     downloads: downloads(),
   };
   window.claude = { use: async n => caps[n] || null };
-  window.ttbPlatform = { name: 'web', version: VERSION, email: user.email, signOut: () => sb.auth.signOut().finally(() => location.reload()) };
+  window.ttbPlatform = { name: 'web', version: VERSION, email: user.email, signOut: () => sb.auth.signOut().finally(() => location.reload()), deleteAccount };
   authEl.hidden = true;
   authEl.innerHTML = '';
   $('#appRoot').hidden = false;
@@ -243,6 +269,7 @@ async function init() {
   });
   const { data } = await sb.auth.getSession();
   if (recovering) { mode = 'newpw'; renderAuth(); return; }
+  if (location.hash === '#left') { history.replaceState(null, '', location.pathname); renderAuth(); authMsg('탈퇴가 끝났어요. 모든 기록을 지웠어요. 그동안 써 주셔서 고마워요.', true); return; }
   if (data && data.session) start(data.session.user);
   else renderAuth();
 }
