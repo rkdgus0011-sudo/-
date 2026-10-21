@@ -744,6 +744,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-varian
 .sub-filter button { padding: 6px 4px; }
 .chips.preset { margin-top: -4px; }
 
+/* 대출 간편 입력 */
+.q-prev { color: var(--warn-ink); }
+.q-prev.ok { color: var(--ink-2); }
+
 /* ---------- web version: page base + sign-in screen ---------- */
 :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 body { margin: 0; }

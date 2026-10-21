@@ -324,7 +324,7 @@ function autoRecord() {
       const id = `l_${l.id}_${r.date.slice(0, 7).replace('-', '')}`;
       if (keys.has(id) || attempted.has(id) || isSkipped(l, id)) continue;
       attempted.add(id);
-      (patches[ymOf(r.date)] ||= {})[id] = makeTx({ date: r.date, kind: 'out', amount: r.pay, cat: 'loan', memo: `${l.name} ${r.k}회차 (이자 ${fmt(r.int)}원)`, method: l.method, loan: l.id, ex: !!l.ex, at: parseD(r.date).getTime() + 9 * 36e5 });
+      (patches[ymOf(r.date)] ||= {})[id] = makeTx({ date: r.date, kind: 'out', amount: r.pay, cat: 'loan', memo: loanMemo(l, r), method: l.method, loan: l.id, ex: !!l.ex, at: parseD(r.date).getTime() + 9 * 36e5 });
     }
   }
   for (const ym in patches) writeMonth(ym, patches[ym]);
@@ -1191,7 +1191,7 @@ function subSheet() {
   const showRecord = !isEdit && cfg().autoSubs && occ <= t && diffDays(occ, t) <= BACKFILL_DAYS;
   return `<form id="subForm" autocomplete="off" novalidate>
     <div class="sheet-h"><h2 id="sheetTitle">${f.type === 'bill' ? '고정 납부' : '구독'} ${isEdit ? '고치기' : '추가'}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
-    <div class="seg" role="group" aria-label="종류" style="width:100%"><button type="button" id="st-sub" data-act="s-type" data-v="sub" ${pressed(f.type !== 'bill')}>구독</button><button type="button" id="st-bill" data-act="s-type" data-v="bill" ${pressed(f.type === 'bill')}>고정 납부</button></div>
+    <div class="seg" role="group" aria-label="종류" style="width:100%"><button type="button" id="st-sub" data-act="s-type" data-v="sub" ${pressed(f.type !== 'bill')}>구독</button><button type="button" id="st-bill" data-act="s-type" data-v="bill" ${pressed(f.type === 'bill')}>고정 납부</button>${isEdit ? '' : '<button type="button" id="st-loan" data-act="s-type" data-v="loan" aria-pressed="false">대출</button>'}</div>
     ${f.type === 'bill' && !isEdit ? `<div class="chips preset" role="group" aria-label="자주 쓰는 항목">${BILL_PRESETS.map((b, i) => `<button class="chip" type="button" data-act="s-preset" data-i="${i}">${b.emoji} ${b.name}</button>`).join('')}</div>` : ''}
     <div class="field"><label class="lab" for="s-name">이름</label><div class="set-row m" style="grid-template-columns:56px minmax(0,1fr)"><input class="input emoji" id="s-emoji" value="${esc(f.emoji)}" placeholder="${esc(catOf(f.cat).emoji)}" aria-label="아이콘 이모지" maxlength="8"><input class="input" id="s-name" value="${esc(f.name)}" placeholder="${f.type === 'bill' ? '예: 월세, 관리비, 보험료' : '예: 넷플릭스, 유튜브 프리미엄'}" maxlength="30"></div></div>
     <div class="field"><label class="lab" for="s-amount">한 번에 내는 금액</label><div class="amt"><input id="s-amount" inputmode="numeric" placeholder="0" value="${f.amount ? fmt(f.amount) : ''}"><span>원</span></div></div>
@@ -1489,14 +1489,15 @@ function loansArr() {
 function loanSchedule(l) {
   const n = Math.max(1, Math.min(600, l.term | 0)), r = Math.max(0, +l.rate || 0) / 100 / 12, B0 = Math.max(0, Math.round(+l.principal || 0));
   const sy = +String(l.start).slice(0, 4), sm = +String(l.start).slice(5, 7);
-  const pmt = l.type === 'equal' ? (r ? (B0 * r) / (1 - Math.pow(1 + r, -n)) : B0 / n) : 0;
+  const pmt = l.type === 'equal' ? (+l.fixedPay > 0 ? Math.round(+l.fixedPay) : r ? (B0 * r) / (1 - Math.pow(1 + r, -n)) : B0 / n) : 0;
+  const fixedInt = l.type === 'bullet' && +l.fixedInt > 0 ? Math.round(+l.fixedInt) : null;
   const out = [];
   let bal = B0;
   for (let k = 1; k <= n; k++) {
     const idx = sm - 1 + k, y = sy + Math.floor(idx / 12), m = (idx % 12) + 1;
-    const int = Math.round(bal * r);
+    const int = fixedInt != null ? fixedInt : Math.round(bal * r);
     let prin = l.type === 'equal' ? Math.round(pmt) - int : l.type === 'principal' ? Math.round(B0 / n) : 0;
-    if (k === n) prin = bal;
+    if (k === n && !l.open) prin = bal;
     prin = Math.max(0, Math.min(prin, bal));
     bal -= prin;
     out.push({ k, date: occOn({ day: l.day }, y, m), int, prin, pay: int + prin, bal });
@@ -1512,7 +1513,7 @@ function loanStats(l) {
     remaining: paid.length ? paid[paid.length - 1].bal : B0,
     next: rest[0] || null,
     thisMonth: rows.find(r => ymOf(r.date) === curYm) || null,
-    paidInt: sum(paid.map(r => r.int)), restInt: sum(rest.map(r => r.int)),
+    paidInt: sum(paid.map(r => r.int)), restInt: sum((l.open ? rest.slice(0, 12) : rest).map(r => r.int)),
     end: rows[rows.length - 1].date,
   };
 }
@@ -1538,7 +1539,7 @@ function vLoans() {
   const head = `<div class="view-h"><h1 class="view-title">대출</h1><div class="view-acts">${vAssetsSwitch('loans')}<button class="btn btn-primary btn-sm" type="button" data-act="add-loan" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}대출 추가</button></div></div>`;
   if (isLoading()) return head + `<section class="card">${emptyBox('불러오는 중이에요', '')}</section>`;
   const loans = loansArr();
-  if (!loans.length) return head + `<section class="card">${emptyBox('등록된 대출이 없어요', '대출 원금, 이자율, 기간, 상환 방식을 넣으면 매달 갚을 돈과 이자를 계산하고 납입일에 자동으로 기록해 드려요.', `<button class="btn btn-primary btn-sm" type="button" data-act="add-loan">${icon('plus')}대출 추가</button>`)}</section>`;
+  if (!loans.length) return head + `<section class="card">${emptyBox('등록된 대출이 없어요', '지금 남은 원금과 매달 내는 이자만 넣으면 돼요. 정기결제 목록과 달력에 바로 올라가고 내는 날에 자동으로 기록해 드려요.', `<button class="btn btn-primary btn-sm" type="button" data-act="add-loan">${icon('plus')}대출 추가</button>`)}</section>`;
   const t = todayStr();
   const stats = loans.map(l => ({ l, s: loanStats(l) }));
   const active = stats.filter(x => x.s.remaining > 0);
@@ -1559,18 +1560,20 @@ function vLoans() {
   const cards = stats.map(({ l, s }) => {
     const pct = s.B0 ? (s.B0 - s.remaining) / s.B0 : 0;
     const nx = s.next;
-    const meta = [l.lender, `연 ${(+l.rate).toLocaleString('ko-KR', { maximumFractionDigits: 3 })}%`, LOAN_TYPES[l.type] || '', `매월 ${l.day}일`].filter(Boolean).join(' · ');
+    const meta = [l.lender, `연 ${(+l.rate).toLocaleString('ko-KR', { maximumFractionDigits: l.entry === 'quick' ? 2 : 3 })}%`, l.open ? '이자만 내는 중' : LOAN_TYPES[l.type] || '', `매월 ${l.day}일`].filter(Boolean).join(' · ');
     return `<section class="card loan-card">
       <div class="loan-top"><span class="emo" aria-hidden="true">${icon('bank')}</span><div style="min-width:0"><p class="loan-name">${esc(l.name)}${l.ex ? '<span class="tag">예시</span>' : ''}</p><p class="loan-meta">${esc(meta)}</p></div><button class="btn btn-ghost btn-sm" type="button" data-act="edit-loan" data-id="${esc(l.id)}">고치기</button></div>
       <div class="loan-prog">
         <div class="row"><span>원금 <b>${Math.round(pct * 100)}%</b> 갚음</span><span>남은 원금 <b>${won(s.remaining)}</b> / ${won(s.B0)}</span></div>
         ${meter(pct, '', true)}
-        ${l.type === 'bullet' && s.remaining > 0 ? `<p class="bud-left">만기일(${mdLabel(s.end)}, ${s.end.slice(0, 4)}년)에 원금을 한 번에 갚는 방식이에요.</p>` : ''}
+        ${l.open ? '<p class="bud-left">매달 이자만 내고 있어요. 만기를 알게 되면 ‘고치기’에서 넣어 주세요.</p>' : ''}
+        ${l.type === 'bullet' && !l.open && s.remaining > 0 ? `<p class="bud-left">만기일(${mdLabel(s.end)}, ${s.end.slice(0, 4)}년)에 원금을 한 번에 갚는 방식이에요.</p>` : ''}
       </div>
       <div class="loan-facts">
         <div><span class="stat-l">다음 납입 ${nx ? `· ${ddayText(nx.date)}` : ''}</span><span class="stat-v">${nx ? won(nx.pay) : '다 갚았어요'}</span>${nx ? `<span class="sub">${mdw(nx.date)} · 원금 ${fmt(nx.prin)} + 이자 ${fmt(nx.int)}</span>` : ''}</div>
-        <div><span class="stat-l">이자 합계</span><span class="stat-v">${won(s.paidInt + s.restInt)}</span><span class="sub">낸 이자 ${fmt(s.paidInt)} · 남은 이자 ${fmt(s.restInt)}</span></div>
-        <div><span class="stat-l">만기</span><span class="stat-v">${s.end.replace(/-/g, '.')}</span><span class="sub">남은 ${s.rest.length}회 / 전체 ${s.rows.length}회</span></div>
+        ${l.open ? `<div><span class="stat-l">1년이면 내는 이자</span><span class="stat-v">${won(s.restInt)}</span><span class="sub">매달 ${fmt(nx ? nx.int : 0)}원 × 12</span></div>
+        <div><span class="stat-l">만기</span><span class="stat-v">정하지 않음</span><span class="sub">이자만 내는 중</span></div>` : `<div><span class="stat-l">이자 합계</span><span class="stat-v">${won(s.paidInt + s.restInt)}</span><span class="sub">낸 이자 ${fmt(s.paidInt)} · 남은 이자 ${fmt(s.restInt)}</span></div>
+        <div><span class="stat-l">만기</span><span class="stat-v">${s.end.replace(/-/g, '.')}</span><span class="sub">남은 ${s.rest.length}회 / 전체 ${s.rows.length}회</span></div>`}
         <div><span class="stat-l">결제수단 · 자동 기록</span><span class="stat-v" style="font-size:14.5px">${esc((methodOf(l.method) || {}).name || '없음')}</span><span class="sub">${l.auto ? '납입일에 내역에 자동 기록' : '자동 기록 꺼짐'}</span></div>
       </div>
       <div class="loan-acts"><button class="btn btn-soft btn-sm" type="button" data-act="loan-sched" data-id="${esc(l.id)}">상환 일정 보기</button></div>
@@ -1578,9 +1581,10 @@ function vLoans() {
   }).join('');
   return head + `${summary}${cards}<p class="set-note muted" style="font-size:12.5px">이자는 매달 남은 원금 × 연 이자율 ÷ 12로 계산해요. 금리가 바뀌거나 중도에 갚았다면 ‘고치기’에서 원금과 금리를 지금 기준으로 바꿔 주세요.</p>`;
 }
-function openLoanSheet(id) {
+function openLoanSheet(id, opt = {}) {
   if (S.mode === 'denied') return;
   const l = id && S.loans[id], t = todayStr();
+  if ((!l && !opt.detail) || (l && l.entry === 'quick')) { F = quickF(l, id, opt.prefill); showSheet(quickLoanSheet(), l ? null : '#q-name'); return; }
   F = l
     ? { mode: 'loan', id, name: l.name || '', lender: l.lender || '', principal: l.principal || 0, rate: String(l.rate ?? ''), start: l.start || t, term: l.term || 12, type: l.type || 'equal', day: l.day || 1, method: l.method || '', auto: l.auto !== false, ex: !!l.ex, since: l.since || t, recordNow: false }
     : { mode: 'loan', id: null, name: '', lender: '', principal: 0, rate: '', start: t, term: 24, type: 'equal', day: +t.slice(8), method: (cfg().methods.find(m => /이체|계좌/.test(m.name)) || {}).id || lastMethod(), auto: true, ex: false, since: t, recordNow: false };
@@ -1600,6 +1604,7 @@ function loanSheet() {
   const showRecord = !isEdit && f.auto && cur && cur.date <= t;
   return `<form id="loanForm" autocomplete="off" novalidate>
     <div class="sheet-h"><h2 id="sheetTitle">${isEdit ? '대출 고치기' : '대출 추가'}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    ${isEdit ? '' : '<div class="seg" role="group" aria-label="입력 방식" style="width:100%"><button type="button" id="lq-quick" data-act="l-qmode2" aria-pressed="false">간편 입력</button><button type="button" id="lq-detail" aria-pressed="true">자세히 입력</button></div>'}
     <div class="field-row"><div class="field"><label class="lab" for="l-name">이름</label><input class="input" id="l-name" maxlength="30" placeholder="예: 전세자금대출" value="${esc(f.name)}"></div><div class="field"><label class="lab" for="l-lender">금융기관 <span class="muted" style="font-weight:400">(선택)</span></label><input class="input" id="l-lender" maxlength="20" placeholder="예: ○○은행" value="${esc(f.lender)}"></div></div>
     <div class="field"><label class="lab" for="l-principal">대출 원금</label><div class="amt"><input id="l-principal" inputmode="numeric" placeholder="0" value="${f.principal ? fmt(f.principal) : ''}"><span>원</span></div><p class="amt-hint" id="lpHint">${f.principal >= 1e4 ? koreanWon(f.principal) : ''}</p></div>
     <div class="field-row"><div class="field"><label class="lab" for="l-rate">연 이자율 (%)</label><input class="input" id="l-rate" inputmode="decimal" placeholder="예: 4.2" value="${esc(f.rate)}"></div><div class="field"><label class="lab" for="l-term">기간 (개월)</label><input class="input" id="l-term" inputmode="numeric" placeholder="예: 24" value="${f.term || ''}"></div></div>
@@ -1618,6 +1623,7 @@ function refreshLoanSheet() {
   const s = $('#l-save'); if (s) s.disabled = !canSaveLoan();
 }
 function saveLoan() {
+  if (F && F.quick) { saveQuickLoan(); return; }
   const f = F;
   if (!canSaveLoan()) return;
   const t = todayStr(), id = f.id || uid('l');
@@ -1644,11 +1650,11 @@ function openSchedule(id) {
   const l = S.loans[id];
   if (!l) return;
   const s = loanStats({ ...l, id }), t = todayStr();
-  const rows = s.rows.map(r => `<tr class="${r.date <= t ? 'paid' : ''}${s.next && r.k === s.next.k ? ' now' : ''}"><td>${r.k}회</td><td>${r.date.slice(2).replace(/-/g, '.')}</td><td>${fmt(r.pay)}</td><td>${fmt(r.prin)}</td><td>${fmt(r.int)}</td><td>${fmt(r.bal)}</td></tr>`).join('');
+  const rows = (l.open ? s.rows.filter(r => r.date <= addDays(t, 731)) : s.rows).map(r => `<tr class="${r.date <= t ? 'paid' : ''}${s.next && r.k === s.next.k ? ' now' : ''}"><td>${r.k}회</td><td>${r.date.slice(2).replace(/-/g, '.')}</td><td>${fmt(r.pay)}</td><td>${fmt(r.prin)}</td><td>${fmt(r.int)}</td><td>${fmt(r.bal)}</td></tr>`).join('');
   F = { mode: 'view' };
   showSheet(`<div style="display:grid;gap:14px">
     <div class="sheet-h"><h2 id="sheetTitle">${esc(l.name)} 상환 일정</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
-    <p class="set-note">총 ${s.rows.length}회 · 총 이자 ${won(s.paidInt + s.restInt)} · 흐린 줄은 지난 회차, 색칠된 줄은 다음 회차예요.</p>
+    <p class="set-note">${l.open ? '만기를 정하지 않아서 앞으로 2년치만 보여 드려요' : `총 ${s.rows.length}회 · 총 이자 ${won(s.paidInt + s.restInt)}`} · 흐린 줄은 지난 회차, 색칠된 줄은 다음 회차예요.</p>
     <div class="tbl-wrap tall"><table class="tbl"><caption class="sr-only">${esc(l.name)} 회차별 상환 일정</caption><thead><tr><th scope="col">회차</th><th scope="col">날짜</th><th scope="col">납입액</th><th scope="col">원금</th><th scope="col">이자</th><th scope="col">남은 원금</th></tr></thead><tbody>${rows}</tbody></table></div>
   </div>`);
   const now = $('#sheet tr.now'); if (now) now.scrollIntoView({ block: 'center' });
@@ -2469,7 +2475,8 @@ function plannedIn(from, to) {
       if (r.date < from || r.date > to || !(r.pay > 0)) continue;
       const id = `l_${l.id}_${r.date.slice(0, 7).replace('-', '')}`;
       if (keys.has(id) || isSkipped(l, id)) continue;
-      out.push({ date: r.date, id, src: 'loan', ref: l.id, name: l.name, emoji: '💸', amount: r.pay, cat: 'loan', method: l.method, k: r.k, int: r.int });
+      out.push({ date: r.date, id, src: 'loan', ref: l.id, name: l.name, emoji: '💸', amount: r.pay, cat: 'loan', method: l.method, k: r.k, int: r.int, memo: loanMemo(l, r),
+        lmeta: l.entry === 'quick' && l.type === 'bullet' ? (r.prin > 0 ? `만기 · 원금 ${won(r.prin)} + 이자 ${won(r.int)}` : '이자만') : `${r.k}회차 · 이자 ${won(r.int)}` });
     }
   }
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.name.localeCompare(b.name)));
@@ -2478,7 +2485,7 @@ if (window.__MOCK__) window.__plannedIn = plannedIn; // test hook
 const planKind = p => (p.src === 'loan' ? '대출' : p.bill ? '고정 납부' : '구독');
 function planRow(p) {
   const early = p.date > todayStr(), m = methodOf(p.method);
-  const meta = [p.src === 'loan' ? `${p.k}회차 · 이자 ${won(p.int)}` : catOf(p.cat).name];
+  const meta = [p.src === 'loan' ? p.lmeta : catOf(p.cat).name];
   if (m) meta.push(m.name);
   return `<div class="plan-row">
     <span class="emo" aria-hidden="true">${esc(p.emoji)}</span>
@@ -2504,7 +2511,7 @@ function payPlan(id, date) {
   if (p.src === 'loan') ensureLoanCat();
   F = {
     mode: 'tx', id: null, newId: p.id, planDate: p.date, origYm: null, kind: 'out', amount: p.amount,
-    cat: p.src === 'loan' ? 'loan' : p.cat, memo: p.src === 'loan' ? `${p.name} ${p.k}회차 (이자 ${fmt(p.int)}원)` : p.name,
+    cat: p.src === 'loan' ? 'loan' : p.cat, memo: p.src === 'loan' ? p.memo : p.name,
     date: early ? t : p.date, method: p.method || '', sub: p.src === 'sub' ? p.ref : '', loan: p.src === 'loan' ? p.ref : '', ex: false, at: 0, catTouched: true,
   };
   showSheet(txSheet(), '#f-amount');
@@ -2539,11 +2546,105 @@ function loanRow(l) {
   const left = st.rows.filter(r => r.date >= t).length;
   return `<button class="sub-row" type="button" data-act="edit-loan" data-id="${esc(l.id)}">
     <span class="emo" aria-hidden="true">💸</span>
-    <span class="tx-main"><span class="sub-name">${esc(l.name)}<span class="tag plan">대출</span>${l.ex ? '<span class="tag">예시</span>' : ''}</span><span class="sub-meta">매월 ${l.day}일 · ${left ? `${left}회 남음` : '상환 끝'}${nx ? ` · 다음 ${mdLabel(nx.date)}` : ''}</span></span>
+    <span class="tx-main"><span class="sub-name">${esc(l.name)}<span class="tag plan">대출</span>${l.ex ? '<span class="tag">예시</span>' : ''}</span><span class="sub-meta">매월 ${l.day}일 · ${l.open ? '이자만 · 만기 미정' : left ? `${left}회 남음` : '상환 끝'}${nx ? ` · 다음 ${mdLabel(nx.date)}` : ''}</span></span>
     <span class="sub-end"><span class="sub-amt">${nx ? won(nx.pay) : '–'}</span>${nx ? `<span class="dday${diffDays(t, nx.date) <= 3 ? ' soon' : ''}">${ddayText(nx.date)}</span>` : ''}</span>
   </button>`;
 }
 const loanMonthly = l => { const st = loanStats(l), r = st.thisMonth || st.next; return r ? r.pay : 0; };
+
+/* ================= 대출 간편 입력: 남은 원금 + 매달 이자만 넣으면 끝 ================= */
+const LOAN_PRESETS = [
+  { name: '전세자금대출', kind: 'int', e: '🏠' }, { name: '학자금대출', kind: 'amort', e: '🎓' }, { name: '신용대출', kind: 'amort', e: '💳' },
+  { name: '주택담보대출', kind: 'amort', e: '🏡' }, { name: '자동차 할부', kind: 'amort', e: '🚗' },
+];
+const rateText = r => `연 ${(Math.round(r * 100) / 100).toLocaleString('ko-KR', { maximumFractionDigits: 2 })}%`;
+function quickF(l, id, extra) {
+  const t = todayStr();
+  const base = { mode: 'loan', quick: true, id: id || null, name: '', lender: '', principal: 0, kind: 'int', int: 0, pay: 0, endY: '', endM: +t.slice(5, 7), day: +t.slice(8), method: (cfg().methods.find(m => /이체|계좌/.test(m.name)) || {}).id || lastMethod(), auto: true, ex: false, since: t };
+  if (!l) return { ...base, ...(extra || {}) };
+  const st = loanStats({ ...l, id }), nx = st.next;
+  return {
+    ...base, name: l.name || '', lender: l.lender || '', principal: st.remaining, kind: l.type === 'bullet' ? 'int' : 'amort',
+    int: l.type === 'bullet' ? Math.round(+l.fixedInt || (nx ? nx.int : 0)) : (nx ? nx.int : 0), pay: Math.round(+l.fixedPay || (nx ? nx.pay : 0)),
+    endY: l.type === 'bullet' && !l.open ? +st.end.slice(0, 4) : '', endM: l.type === 'bullet' && !l.open ? +st.end.slice(5, 7) : +t.slice(5, 7),
+    day: l.day || 1, method: l.method || '', auto: l.auto !== false, ex: !!l.ex, since: l.since || t,
+  };
+}
+// turn the simple answers into a regular loan (schedule starts with the next payment day)
+function quickCalc(f) {
+  const t = todayStr(), P = f.principal, I = f.int, A = f.pay;
+  if (!f.name.trim()) return { ok: false, msg: '대출 이름을 넣어 주세요.' };
+  if (!(P > 0)) return { ok: false, msg: '지금 남은 원금을 넣어 주세요.' };
+  if (f.kind === 'int' && !(I > 0)) return { ok: false, msg: '매달 내는 이자를 넣어 주세요.' };
+  if (f.kind === 'amort' && !(A > 0)) return { ok: false, msg: '매달 내는 돈(원금+이자)을 넣어 주세요.' };
+  if (f.kind === 'amort' && !(A > I)) return { ok: false, msg: '매달 내는 돈이 이자보다 많아야 원금이 줄어요.' };
+  const first = nextOcc({ day: f.day }, t), fy = +first.slice(0, 4), fm = +first.slice(5, 7);
+  const py = fm === 1 ? fy - 1 : fy, pm = fm === 1 ? 12 : fm - 1;
+  const start = occOn({ day: f.day }, py, pm), rate = (I * 12) / P * 100;
+  let loan;
+  if (f.kind === 'int') {
+    let term = 360, open = true;
+    if (f.endY) {
+      term = (f.endY * 12 + f.endM) - (py * 12 + pm); open = false;
+      if (term < 1) return { ok: false, msg: '만기가 다음 납부일보다 빨라요. 만기를 확인해 주세요.' };
+    }
+    loan = { type: 'bullet', principal: P, rate, start, term, fixedInt: I, fixedPay: 0, open };
+  } else {
+    const r = rate / 100 / 12;
+    const term = r > 0 ? Math.ceil(-Math.log(1 - (r * P) / A) / Math.log(1 + r) - 1e-9) : Math.ceil(P / A);
+    if (!(term >= 1) || term > 600) return { ok: false, msg: '다 갚는 데 50년이 넘게 걸려요. 금액을 확인해 주세요.' };
+    loan = { type: 'equal', principal: P, rate, start, term, fixedInt: 0, fixedPay: A, open: false };
+  }
+  const st = loanStats({ ...loan, day: f.day });
+  let msg;
+  if (f.kind === 'int') msg = `매달 ${f.day}일에 이자 ${won(I)}을 내요 (${rateText(rate)} 수준) · 첫 납부 ${mdw(first)}` + (loan.open ? ' · 만기는 정하지 않았어요' : ` · ${f.endY}년 ${f.endM}월 만기에 원금 ${won(P)}을 갚아요`);
+  else msg = `매달 ${f.day}일에 ${won(A)}씩 내요 (${rateText(rate)} 수준) · ${loan.term}개월 뒤 ${st.end.slice(0, 4)}년 ${+st.end.slice(5, 7)}월에 다 갚아요 · 앞으로 낼 이자 약 ${won(st.restInt)}`;
+  return { ok: true, msg, loan, first };
+}
+function quickLoanSheet() {
+  const f = F, isEdit = !!f.id, q = quickCalc(f), t = todayStr(), y0 = +t.slice(0, 4);
+  return `<form id="qloanForm" autocomplete="off" novalidate>
+    <div class="sheet-h"><h2 id="sheetTitle">${isEdit ? '대출 고치기' : '대출 추가'}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    ${isEdit ? '' : `<div class="seg" role="group" aria-label="입력 방식" style="width:100%"><button type="button" id="lq-quick" data-act="l-qmode" data-v="quick" aria-pressed="true">간편 입력</button><button type="button" id="lq-detail" data-act="l-qmode" data-v="detail" aria-pressed="false">자세히 입력</button></div>
+    <div class="chips preset" role="group" aria-label="자주 쓰는 대출">${LOAN_PRESETS.map((p, i) => `<button class="chip" type="button" data-act="l-preset" data-i="${i}">${p.e} ${p.name}</button>`).join('')}</div>`}
+    <div class="field"><label class="lab" for="q-name">이름</label><input class="input" id="q-name" maxlength="30" placeholder="예: 전세자금대출" value="${esc(f.name)}"></div>
+    <div class="field"><label class="lab" for="q-principal">지금 남은 원금</label><div class="amt"><input id="q-principal" inputmode="numeric" placeholder="0" value="${f.principal ? fmt(f.principal) : ''}"><span>원</span></div><p class="amt-hint" id="qpHint">${f.principal >= 1e4 ? koreanWon(f.principal) : '처음 빌린 금액이 아니라 오늘 기준으로 남은 금액이에요.'}</p></div>
+    <div class="field"><span class="lab" id="qkLab">갚는 방식</span><div class="seg" role="group" aria-labelledby="qkLab" style="width:100%"><button type="button" id="qk-int" data-act="l-kind" data-v="int" ${pressed(f.kind === 'int')}>이자만 내요</button><button type="button" id="qk-amort" data-act="l-kind" data-v="amort" ${pressed(f.kind === 'amort')}>원금도 같이 갚아요</button></div></div>
+    ${f.kind === 'amort' ? `<div class="field"><label class="lab" for="q-pay">매달 내는 돈 <span class="muted" style="font-weight:400">(원금+이자)</span></label><div class="amt"><input id="q-pay" inputmode="numeric" placeholder="0" value="${f.pay ? fmt(f.pay) : ''}"><span>원</span></div></div>` : ''}
+    <div class="field"><label class="lab" for="q-int">${f.kind === 'amort' ? '그중 이번 달 이자' : '매달 내는 이자'}</label><div class="amt"><input id="q-int" inputmode="numeric" placeholder="0" value="${f.int ? fmt(f.int) : ''}"><span>원</span></div><p class="amt-hint">은행 앱의 ‘상환 내역’이나 문자에서 볼 수 있어요. 금리는 자동으로 계산해요.</p></div>
+    ${f.kind === 'int' ? `<div class="field"><span class="lab" id="qeLab">만기 <span class="muted" style="font-weight:400">(모르면 비워 두세요)</span></span><div class="field-row" role="group" aria-labelledby="qeLab"><select class="input" id="q-end-y" aria-label="만기 연도"><option value="">정하지 않음</option>${range(y0, y0 + 40).map(y => `<option value="${y}"${y === f.endY ? ' selected' : ''}>${y}년</option>`).join('')}</select><select class="input" id="q-end-m" aria-label="만기 월" ${f.endY ? '' : 'disabled'}>${range(1, 12).map(m => `<option value="${m}"${m === f.endM ? ' selected' : ''}>${m}월</option>`).join('')}</select></div></div>` : ''}
+    <div class="field"><label class="lab" for="q-day">매달 내는 날</label><select class="input" id="q-day">${range(1, 31).map(d => `<option value="${d}"${d === f.day ? ' selected' : ''}>${d}일</option>`).join('')}</select></div>
+    <div class="field"><span class="lab" id="qmLab">결제수단</span><div class="chips" role="group" aria-labelledby="qmLab">${cfg().methods.map(m => `<button class="chip" type="button" id="lm-${esc(m.id)}" data-act="l-method" data-id="${esc(m.id)}" ${pressed(f.method === m.id)}>${esc(m.name)}</button>`).join('')}</div></div>
+    <label class="check"><input type="checkbox" id="q-auto"${f.auto ? ' checked' : ''}><span>내는 날이 되면 내역에 ‘대출 상환’ 지출로 자동 기록하기</span></label>
+    <p class="sheet-note q-prev${q.ok ? ' ok' : ''}" id="qPrev">${esc(q.msg)}</p>
+    <p class="set-note" style="font-size:12.5px">저장하면 정기결제 목록과 달력에 바로 올라가요. 금리가 바뀌면 ‘고치기’에서 이자만 바꾸면 돼요.</p>
+    <div class="sheet-actions">${isEdit ? `<button class="btn btn-danger" type="button" data-act="l-delete">${icon('trash')}삭제</button>` : ''}<button class="btn btn-primary btn-block" type="submit" id="q-save" ${q.ok ? '' : 'disabled'}>${isEdit ? '고친 내용 저장' : '추가하기'}</button></div>
+  </form>`;
+}
+function refreshQuick() {
+  const q = quickCalc(F), p = $('#qPrev');
+  if (p) { p.textContent = q.msg; p.classList.toggle('ok', q.ok); }
+  const s = $('#q-save'); if (s) s.disabled = !q.ok;
+}
+function saveQuickLoan() {
+  const f = F, q = quickCalc(f);
+  if (!q.ok) return;
+  const t = todayStr(), id = f.id || uid('l'), prev = f.id ? S.loans[f.id] : null;
+  const loan = {
+    name: f.name.trim().slice(0, 30), lender: (f.lender || '').trim().slice(0, 20), principal: q.loan.principal, rate: Math.round(q.loan.rate * 1e6) / 1e6,
+    start: q.loan.start, term: q.loan.term, type: q.loan.type, day: f.day, method: f.method, auto: f.auto,
+    since: prev && prev.since && prev.since < t ? (f.auto && !prev.auto ? t : prev.since) : t,
+    ex: !!f.ex, entry: 'quick', fixedInt: q.loan.fixedInt, fixedPay: q.loan.fixedPay, open: q.loan.open, skips: (prev && prev.skips) || {},
+  };
+  if (loan.auto) ensureLoanCat();
+  writeLoans({ [id]: loan });
+  closeSheet();
+  toast(f.id ? '고쳤어요. 오늘 기준으로 다시 계산했어요' : `‘${loan.name}’${josa(loan.name, '을/를').slice(-1)} 추가했어요. 달력에 ${mdLabel(q.first)}부터 보여요`);
+  autoRecord();
+}
+const loanMemo = (l, r) => (l.entry === 'quick' && l.type === 'bullet'
+  ? `${l.name} ${r.prin > 0 ? '만기 상환' : '이자'}${r.prin > 0 ? ` (이자 ${fmt(r.int)}원)` : ''}`
+  : `${l.name} ${r.k}회차 (이자 ${fmt(r.int)}원)`);
 
 /* ================= toast ================= */
 let toastTimer = 0, toastUndo = null;
@@ -2578,6 +2679,9 @@ function onMoneyInput(el) {
   else if (el.id === 'g-monthly') { F.monthly = v; refreshGoalSheet(); }
   else if (el.id === 'dep-amount') { F.amount = v; $('#dep-save').disabled = !(v > 0); }
   else if (el.id === 'su-income' || el.id === 'su-fixed') { F[el.id === 'su-income' ? 'income' : 'fixed'] = v; const pl = document.createElement('div'); pl.innerHTML = setupSheet(); const np = pl.querySelector('#suPlan'); if (np) $('#suPlan').innerHTML = np.innerHTML; $('#su-save').disabled = !(F.income > 0 && F.income > F.fixed); }
+  else if (el.id === 'q-principal') { F.principal = v; $('#qpHint').textContent = v >= 1e4 ? koreanWon(v) : '처음 빌린 금액이 아니라 오늘 기준으로 남은 금액이에요.'; refreshQuick(); }
+  else if (el.id === 'q-pay') { F.pay = v; refreshQuick(); }
+  else if (el.id === 'q-int') { F.int = v; refreshQuick(); }
   else if (el.id === 'l-principal') { F.principal = v; $('#lpHint').textContent = v >= 1e4 ? koreanWon(v) : ''; refreshLoanSheet(); }
   else if (el.id === 'b-total') { F.total = v; $('#bHint').textContent = budHint(); }
   else if (el.dataset.bcat) {
@@ -2598,7 +2702,7 @@ const ACT = {
   'plan-pay': el => payPlan(el.dataset.id, el.dataset.date),
   'plan-skip': el => skipPlan(el.dataset.id, el.dataset.date),
   'sub-filter': el => { S.subFilter = el.dataset.v; renderView(); },
-  's-type': el => { F.type = el.dataset.v; const has = id => catsOf('out').some(c => c.id === id); if (F.type === 'bill' && F.cat === 'subs' && has('home')) F.cat = 'home'; if (F.type === 'sub' && F.cat === 'home' && has('subs')) F.cat = 'subs'; rerenderSheet(subSheet()); },
+  's-type': el => { if (el.dataset.v === 'loan') { const day = F.day; openLoanSheet(null, { prefill: { day } }); return; } F.type = el.dataset.v; const has = id => catsOf('out').some(c => c.id === id); if (F.type === 'bill' && F.cat === 'subs' && has('home')) F.cat = 'home'; if (F.type === 'sub' && F.cat === 'home' && has('subs')) F.cat = 'subs'; rerenderSheet(subSheet()); },
   's-preset': el => { const b = BILL_PRESETS[+el.dataset.i]; if (!b) return; F.name = b.name; F.emoji = b.emoji; if (catsOf('out').some(c => c.id === b.cat)) F.cat = b.cat; rerenderSheet(subSheet()); const a = $('#s-amount'); if (a) a.focus(); },
   'edit-budget': () => openBudgetSheet(),
   'filter-cat': el => { S.filter = { kind: 'all', cat: el.dataset.cat, method: '', q: '' }; S.listMode = 'list'; go('list'); },
@@ -2662,6 +2766,16 @@ const ACT = {
   'edit-loan': el => openLoanSheet(el.dataset.id),
   'loan-sched': el => openSchedule(el.dataset.id),
   'l-type': el => { F.type = el.dataset.v; rerenderSheet(loanSheet()); },
+  'l-kind': el => { F.kind = el.dataset.v; F.kindTouched = true; rerenderSheet(quickLoanSheet()); },
+  'l-preset': el => { const p = LOAN_PRESETS[+el.dataset.i]; if (!p) return; F.name = p.name; F.kind = p.kind; F.kindTouched = true; rerenderSheet(quickLoanSheet()); const a = $('#q-principal'); if (a) a.focus(); },
+  'l-qmode': el => {
+    if (el.dataset.v === 'quick' || !F || !F.quick) return;
+    const q = F; openLoanSheet(null, { detail: true });
+    Object.assign(F, { name: q.name, principal: q.principal, day: q.day, method: q.method }, q.kindTouched ? { type: q.kind === 'int' ? 'bullet' : 'equal' } : {});
+    if (q.principal > 0 && q.int > 0) F.rate = String(Math.round(q.int * 12 / q.principal * 100 * 100) / 100);
+    rerenderSheet(loanSheet());
+  },
+  'l-qmode2': () => { const d = F; F = quickF(null, null, { name: d.name, principal: d.principal, day: d.day, method: d.method, kind: d.type === 'bullet' ? 'int' : 'amort' }); rerenderSheet(quickLoanSheet()); },
   'l-method': el => { F.method = el.dataset.id; for (const b of document.querySelectorAll('#sheet [data-act="l-method"]')) b.setAttribute('aria-pressed', String(b.dataset.id === F.method)); },
   'l-delete': () => deleteLoan(),
   theme: el => { applyTheme(el.dataset.id); saveSettings({ ...cfg(), theme: el.dataset.id }); },
@@ -2710,7 +2824,7 @@ document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'flt-q') { S.filter.q = el.value; updateListResults(); return; }
   if (el.id === 'ai-q') { S.aiDraft = el.value; return; }
-  if (el.id === 'f-amount' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || el.id === 'g-target' || el.id === 'g-monthly' || el.id === 'dep-amount' || el.id === 'su-income' || el.id === 'su-fixed' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
+  if (el.id === 'f-amount' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || el.id === 'q-principal' || el.id === 'q-pay' || el.id === 'q-int' || el.id === 'g-target' || el.id === 'g-monthly' || el.id === 'dep-amount' || el.id === 'su-income' || el.id === 'su-fixed' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
   if (F && F.mode === 'goal') {
     if (el.id === 'g-name') F.name = el.value;
     else if (el.id === 'g-emoji') F.emoji = el.value;
@@ -2721,6 +2835,7 @@ document.addEventListener('input', e => {
     return;
   }
   if (F && F.mode === 'dep' && el.id === 'dep-memo') { F.memo = el.value; return; }
+  if (F && F.mode === 'loan' && F.quick) { if (el.id === 'q-name') { F.name = el.value; refreshQuick(); } return; }
   if (F && F.mode === 'loan') {
     if (el.id === 'l-name') F.name = el.value;
     else if (el.id === 'l-lender') F.lender = el.value;
@@ -2751,6 +2866,10 @@ document.addEventListener('change', e => {
     case 's-record': F.recordNow = el.checked; break;
     case 'l-start': if (isYmd(el.value)) { F.start = el.value; rerenderSheet(loanSheet()); } break;
     case 'l-day': F.day = +el.value; rerenderSheet(loanSheet()); break;
+    case 'q-day': F.day = +el.value; refreshQuick(); break;
+    case 'q-end-y': F.endY = el.value ? +el.value : ''; rerenderSheet(quickLoanSheet()); break;
+    case 'q-end-m': F.endM = +el.value; refreshQuick(); break;
+    case 'q-auto': F.auto = el.checked; break;
     case 'l-auto': F.auto = el.checked; rerenderSheet(loanSheet()); break;
     case 'l-record': F.recordNow = el.checked; break;
     case 'g-start': if (isYmd(el.value)) { F.start = el.value; refreshGoalSheet(); } break;
