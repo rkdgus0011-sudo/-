@@ -110,12 +110,13 @@ const S = {
   goalsDoc: false,
   nospend: {},                // 'YYYY-MM' -> { 'YYYY-MM-DD': true } (무지출로 체크한 날)
   credit: {}, creditDoc: false,
+  memos: {}, memosDoc: false,   // 쓸 돈 메모: memoId -> memo | null
   loaded: { months: false, meta: false },
   definitive: { months: false, meta: false },
   pending: 0, syncError: false, storeError: false,
   view: VIEW_NAMES.includes(prefs.view) ? prefs.view : 'home',
   ym: ymOf(todayStr()),
-  listMode: prefs.listMode === 'cal' ? 'cal' : 'list',
+  listMode: ['cal', 'plan', 'often'].includes(prefs.listMode) ? prefs.listMode : 'list',
   filter: { kind: 'all', cat: '', method: '', q: '' },
   selDay: null, showTable: false, setKind: 'out', confirmClear: false, leave: null, focusAfter: null,
 };
@@ -336,6 +337,7 @@ function hasExamples() {
   for (const id in S.loans) if (S.loans[id] && S.loans[id].ex) return true;
   for (const id in S.goals) if (S.goals[id] && S.goals[id].ex) return true;
   for (const id in S.credit) if (S.credit[id] && S.credit[id].ex) return true;
+  for (const id in S.memos) if (S.memos[id] && S.memos[id].ex) return true;
   for (const ym in S.months) for (const id in S.months[ym]) { const t = S.months[ym][id]; if (t && t.ex) return true; }
   return false;
 }
@@ -367,6 +369,9 @@ function clearExamples() {
   const cp = {};
   for (const id in S.credit) if (S.credit[id] && S.credit[id].ex) cp[id] = null;
   if (Object.keys(cp).length) writeCredit(cp);
+  const mp = {};
+  for (const id in S.memos) if (S.memos[id] && S.memos[id].ex) mp[id] = null;
+  if (Object.keys(mp).length) writeMemos(mp);
   if (cfg().budgetEx) saveSettings({ ...cfg(), budget: { total: 0, cats: {} }, budgetEx: false });
 }
 
@@ -391,7 +396,7 @@ function startLive(db) {
     onData();
   }, onStoreError);
   db.collection('meta').onSnapshot(snap => {
-    let st = null, subs = {}, subsDoc = false, loans = {}, loansDoc = false, sawGoals = false, sawCredit = false;
+    let st = null, subs = {}, subsDoc = false, loans = {}, loansDoc = false, sawGoals = false, sawCredit = false, sawMemos = false;
     for (const d of snap.docs) {
       const data = d.data() || {};
       if (d.id === 'settings') st = data;
@@ -399,8 +404,10 @@ function startLive(db) {
       else if (d.id === 'loans') { loans = { ...(data.items || {}) }; loansDoc = true; }
       else if (d.id === 'goals') { S.goals = { ...(data.items || {}) }; S.goalsDoc = true; sawGoals = true; }
       else if (d.id === 'credit') { S.credit = { ...(data.items || {}) }; S.creditDoc = true; sawCredit = true; }
+      else if (d.id === 'memos') { S.memos = { ...(data.items || {}) }; S.memosDoc = true; sawMemos = true; }
     }
     if (!sawCredit) { S.credit = {}; S.creditDoc = false; }
+    if (!sawMemos) { S.memos = {}; S.memosDoc = false; }
     if (!sawGoals) { S.goals = {}; S.goalsDoc = false; }
     S.settings = st ? normSettings(st) : null; S.subs = subs; S.subsDoc = subsDoc; S.loans = loans; S.loansDoc = loansDoc; S.loaded.meta = true;
     if (st) applyTheme(S.settings.theme);
@@ -586,9 +593,11 @@ function vHome() {
   </section>`;
 
   const bs = budgetSummary(ym, tot.out);
+  const mt = isCur ? memoTotalThisMonth() : 0;
+  const memoLine = bs && mt ? `<p class="bud-foot memo-foot">📝 메모한 쓸 돈 <b>${won(mt)}</b>${bs.left - mt >= 0 ? `까지 쓰면 <b>${won(bs.left - mt)}</b> 남아요` : `을 다 쓰면 예산을 <b>${won(mt - bs.left)}</b> 넘어요`} <button class="card-link" type="button" data-act="go-memos">메모 보기</button></p>` : '';
   const budget = `<section class="card" data-o="2">
     <div class="card-h"><h2 class="card-t">${mLabel(ym)} 예산</h2><button class="card-link" type="button" data-view="budget">자세히${icon('right')}</button></div>
-    ${bs ? `<div class="bud-head"><p class="bud-pct">${Math.round(bs.pct * 100)}%<small>사용</small></p>${stateChip(bs.state, bs.left)}<span class="bud-of">${won(bs.B)} 중 ${won(tot.out)}</span></div>${meter(bs.pct, bs.state)}<p class="bud-foot">${bs.foot}</p>`
+    ${bs ? `<div class="bud-head"><p class="bud-pct">${Math.round(bs.pct * 100)}%<small>사용</small></p>${stateChip(bs.state, bs.left)}<span class="bud-of">${won(bs.B)} 중 ${won(tot.out)}</span></div>${meter(bs.pct, bs.state)}<p class="bud-foot">${bs.foot}</p>${memoLine}`
          : emptyBox('예산을 정해 볼까요?', '한 달 예산을 정하면 남은 돈과 하루에 쓸 수 있는 금액을 알려 드려요.', `<button class="btn btn-soft btn-sm" type="button" data-act="edit-budget">예산 정하기</button>`)}
   </section>`;
 
@@ -810,18 +819,18 @@ function vList() {
     + `<optgroup label="수입">${catsOf('in').map(c => opt(c.id, `${c.emoji} ${c.name}`, f.cat)).join('')}</optgroup>`;
   const mOpts = opt('', '결제수단 전체', f.method) + cfg().methods.map(m => opt(m.id, m.name, f.method)).join('');
   return `<div class="view-h"><h1 class="view-title">${mLabel(ym)} 내역</h1>
-      <div class="seg" role="group" aria-label="보기 방식"><button type="button" id="lm-list" data-act="list-mode" data-mode="list" aria-pressed="${S.listMode === 'list'}">목록</button><button type="button" id="lm-cal" data-act="list-mode" data-mode="cal" aria-pressed="${S.listMode === 'cal'}">달력</button></div></div>
-    <div class="filters">
+      <div class="seg list-seg" role="group" aria-label="보기 방식">${[['list', '목록'], ['cal', '달력'], ['plan', '쓸 돈 메모'], ['often', '자주 쓴 것']].map(([k, l]) => `<button type="button" id="lm-${k}" data-act="list-mode" data-mode="${k}" aria-pressed="${S.listMode === k}">${l}</button>`).join('')}</div></div>
+    ${S.listMode === 'plan' ? `<section class="card" id="listRes">${planMode(ym)}</section>` : S.listMode === 'often' ? `<section class="card" id="listRes">${oftenMode(ym)}</section>` : `<div class="filters">
       <div class="seg" role="group" aria-label="수입·지출 구분">${[['all', '전체'], ['out', '지출'], ['in', '수입']].map(([k, l]) => `<button type="button" id="fk-${k}" data-act="kind-filter" data-kind="${k}" aria-pressed="${f.kind === k}">${l}</button>`).join('')}</div>
       <select class="input" id="flt-cat" aria-label="카테고리로 거르기">${catOpts}</select>
       <select class="input" id="flt-method" aria-label="결제수단으로 거르기">${mOpts}</select>
       <label class="search">${icon('search')}<span class="sr-only">내용 검색</span><input class="input" id="flt-q" type="search" placeholder="내용 검색" value="${esc(f.q)}" autocomplete="off"></label>
     </div>
     <section class="card sumbar" id="listSum" aria-label="거른 내역 합계">${sumBar(list)}</section>
-    <section class="card" id="listRes">${S.listMode === 'cal' ? calView(ym, list) : listView(all, list)}</section>`;
+    <section class="card" id="listRes">${S.listMode === 'cal' ? calView(ym, list) : listView(all, list)}</section>`}`;
 }
 function updateListResults() {
-  if (S.view !== 'list') return;
+  if (S.view !== 'list' || S.listMode === 'plan' || S.listMode === 'often') return;
   const all = txsOf(S.ym), list = applyFilter(all);
   const sumEl = $('#listSum'), res = $('#listRes');
   if (!sumEl || !res) return;
@@ -852,6 +861,8 @@ function calGrid(ym, list, o) {
   }
   const maxOut = Math.max(0, ...Object.values(by).map(e => e.out));
   const marks = S.nospend[ym] || {};
+  const mm = {};
+  for (const m of openMemos()) if (m.date && ymOf(m.date) === ym) mm[+m.date.slice(8)] = (mm[+m.date.slice(8)] || 0) + 1;
   const pl = {};
   if (o.plan !== false) { const f0 = `${ym}-01`; for (const p of plannedIn(t > f0 ? t : f0, `${ym}-${pad(n)}`)) { const dd = +p.date.slice(8); pl[dd] = (pl[dd] || 0) + p.amount; } }
   let cells = DOW.map((d, i) => `<div class="cal-dow${i === 0 ? ' sun' : i === 6 ? ' sat' : ''}" aria-hidden="true">${d}</div>`).join('');
@@ -862,10 +873,10 @@ function calGrid(ym, list, o) {
     const heat = r === 0 ? '' : r <= 1 / 3 ? ' h1' : r <= 2 / 3 ? ' h2' : ' h3';
     const top = e ? Object.entries(e.cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c]) => catOf(c)) : [];
     const label = `${+ym.slice(5)}월 ${d}일${ds === t ? ' 오늘' : ''}${e ? `${e.in ? `, 수입 ${won(e.in)}` : ''}${e.out ? `, 지출 ${won(e.out)}` : ''}${top.length ? ` (${top.map(c => c.name).join(', ')})` : ''}` : ', 기록 없음'}`;
-    cells += `<button type="button" class="cal-cell${heat}${ds === t ? ' today' : ''}" id="${o.idp}-${d}" data-act="${o.act}" data-date="${ds}" aria-pressed="${ds === o.sel}" aria-label="${esc(label + (pl[d] ? `, 정기 납부 예정 ${won(pl[d])}` : ''))}"><span class="d">${d}</span>${!(e && e.out) && marks[ds] ? '<span class="cn">무지출</span>' : ''}${top.length ? `<span class="ce" aria-hidden="true">${top.map(c => esc(c.emoji)).join('')}</span>` : ''}${e && e.in ? `<span class="ci">${amtPair('+', e.in)}</span>` : ''}${e && e.out ? `<span class="co">${amtPair('−', e.out)}</span>` : ''}${pl[d] ? `<span class="cp">${amtPair('', pl[d])}</span>` : ''}</button>`;
+    cells += `<button type="button" class="cal-cell${heat}${ds === t ? ' today' : ''}" id="${o.idp}-${d}" data-act="${o.act}" data-date="${ds}" aria-pressed="${ds === o.sel}" aria-label="${esc(label + (pl[d] ? `, 정기 납부 예정 ${won(pl[d])}` : '') + (mm[d] ? `, 쓸 돈 메모 ${mm[d]}건` : ''))}"><span class="d">${d}${mm[d] ? '<i class="cm" aria-hidden="true">📝</i>' : ''}</span>${!(e && e.out) && marks[ds] ? '<span class="cn">무지출</span>' : ''}${top.length ? `<span class="ce" aria-hidden="true">${top.map(c => esc(c.emoji)).join('')}</span>` : ''}${e && e.in ? `<span class="ci">${amtPair('+', e.in)}</span>` : ''}${e && e.out ? `<span class="co">${amtPair('−', e.out)}</span>` : ''}${pl[d] ? `<span class="cp">${amtPair('', pl[d])}</span>` : ''}</button>`;
   }
   return `<div class="cal${o.compact ? ' compact' : ''}" role="group" aria-label="${+ym.slice(0, 4)}년 ${+ym.slice(5)}월 달력">${cells}</div>
-    <div class="cal-legend"><span>지출 적음</span><i class="h1"></i><i class="h2"></i><i class="h3"></i><span>많음</span>${Object.keys(pl).length ? '<span class="cp-key">예정</span><span>정기 납부</span>' : ''}${o.compact ? '<span class="cal-hint">· 날짜를 누르면 그날 내역이 보여요</span>' : ''}</div>`;
+    <div class="cal-legend"><span>지출 적음</span><i class="h1"></i><i class="h2"></i><i class="h3"></i><span>많음</span>${Object.keys(pl).length ? '<span class="cp-key">예정</span><span>정기 납부</span>' : ''}${Object.keys(mm).length ? '<span class="cm-key">📝 쓸 돈 메모</span>' : ''}${o.compact ? '<span class="cal-hint">· 날짜를 누르면 그날 내역이 보여요</span>' : ''}</div>`;
 }
 // full and short forms; CSS shows the short one where cells are narrow
 const amtPair = (sign, n) => `<span class="a-full">${sign}${cellAmt(n)}</span><span class="a-short">${sign}${n >= 1e4 ? compact(n) : fmt(n)}</span>`;
@@ -874,7 +885,7 @@ function calView(ym, list) {
   const sel = S.selDay && ymOf(S.selDay) === ym ? S.selDay : (ymOf(t) === ym ? t : null);
   const dayList = sel ? list.filter(x => x.date === sel) : [];
   return calGrid(ym, list, { idp: 'cal', act: 'cal-day', sel })
-    + (sel ? `<div class="day cal-day"><div class="day-h"><b>${dayHead(sel)}</b><button class="card-link" type="button" data-act="add" data-date="${sel}">${icon('plus', 'sm')}이 날 기록</button></div>${dayList.length ? dayList.map(txRow).join('') : '<p class="muted cal-none">이 날은 기록이 없어요.</p>'}${plannedBlock(sel)}<button class="card-link plan-add" type="button" data-act="add-bill" data-date="${sel}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('repeat', 'sm')}이 날 정기 납부 추가</button></div>` : '');
+    + (sel ? `<div class="day cal-day"><div class="day-h"><b>${dayHead(sel)}</b><button class="card-link" type="button" data-act="add" data-date="${sel}">${icon('plus', 'sm')}이 날 기록</button></div>${dayList.length ? dayList.map(txRow).join('') : '<p class="muted cal-none">이 날은 기록이 없어요.</p>'}${plannedBlock(sel)}${memoBlock(sel)}<div class="plan-links"><button class="card-link plan-add" type="button" data-act="add-bill" data-date="${sel}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('repeat', 'sm')}이 날 정기 납부 추가</button>${sel >= todayStr() ? `<button class="card-link plan-add" type="button" data-act="memo-add" data-date="${sel}" ${S.mode === 'denied' ? 'disabled' : ''}>📝 이 날 쓸 돈 메모</button>` : ''}</div></div>` : '');
 }
 function openDaySheet(date) {
   if (!isYmd(date)) return;
@@ -889,7 +900,8 @@ function daySheetHtml(date) {
     ${list.length ? `<div class="rank">${list.map(txRow).join('')}</div>` : '<p class="muted cal-none">이 날은 기록이 없어요.</p>'}
     ${!tt.out && date <= todayStr() && S.mode !== 'denied' ? `<button class="btn btn-soft btn-block" type="button" data-act="nospend" data-date="${date}" data-on="${isNoSpend(date) ? 0 : 1}">${isNoSpend(date) ? '무지출 체크 취소' : '이 날은 돈을 안 썼어요 (무지출 체크)'}</button>` : ''}
     ${plannedBlock(date)}
-    <div class="day-acts"><button class="btn btn-primary" type="button" data-act="add" data-date="${date}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}이 날 기록하기</button><button class="btn btn-soft" type="button" data-act="add-bill" data-date="${date}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('repeat')}정기 납부 추가</button></div>
+    ${memoBlock(date)}
+    <div class="day-acts"><button class="btn btn-primary" type="button" data-act="add" data-date="${date}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}이 날 기록하기</button><button class="btn btn-soft" type="button" data-act="add-bill" data-date="${date}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('repeat')}정기 납부 추가</button>${date >= todayStr() ? `<button class="btn btn-soft" type="button" data-act="memo-add" data-date="${date}" ${S.mode === 'denied' ? 'disabled' : ''}>📝 쓸 돈 메모</button>` : ''}</div>
   </div>`;
 }
 
@@ -1103,7 +1115,8 @@ function txSheet() {
   return `<form id="txForm" autocomplete="off" novalidate>
     <div class="sheet-h"><h2 id="sheetTitle">${isEdit ? '기록 고치기' : '새 기록'}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
     <div class="seg" role="group" aria-label="지출·수입" style="width:100%"><button type="button" id="fk2-out" data-act="f-kind" data-kind="out" ${pressed(f.kind === 'out')}>지출</button><button type="button" id="fk2-in" data-act="f-kind" data-kind="in" ${pressed(f.kind === 'in')}>수입</button></div>
-    ${!f.id && !f.newId ? (f.smsOpen ? `<div class="field sms-box"><label class="lab" for="f-sms">카드 결제 문자를 붙여 넣으세요</label><textarea class="input" id="f-sms" rows="4" placeholder="[Web발신] ○○카드 승인 12,000원 10/20 12:34 스타벅스"></textarea><p class="amt-hint" id="smsHint">문자 내용은 저장하지 않고 금액·가게·날짜만 읽어요.</p><div class="habit-acts"><button class="btn btn-primary btn-sm" type="button" data-act="sms-apply">읽어서 채우기</button><button class="btn btn-ghost btn-sm" type="button" data-act="sms-close">닫기</button></div></div>` : `<button class="card-link sms-open" type="button" data-act="sms-open">${icon('phone', 'sm')}결제 문자로 채우기</button>`) : ''}
+    ${!f.id && !f.newId && !f.memoId && f.kind === 'out' ? (() => { const ch = oftenChips(); return ch.length ? `<div class="often-chips"><span class="lab">자주 쓰는 내역</span><div class="chips">${ch.map((x, i) => `<button class="chip" type="button" data-act="f-often" data-k="${esc(x.k)}">${esc(catOf(x.cat).emoji)} ${esc(x.name)} <small>${compact(x.last.amount)}</small></button>`).join('')}</div></div>` : ''; })() : ''}
+    ${!f.id && !f.newId && !f.memoId ? (f.smsOpen ? `<div class="field sms-box"><label class="lab" for="f-sms">카드 결제 문자를 붙여 넣으세요</label><textarea class="input" id="f-sms" rows="4" placeholder="[Web발신] ○○카드 승인 12,000원 10/20 12:34 스타벅스"></textarea><p class="amt-hint" id="smsHint">문자 내용은 저장하지 않고 금액·가게·날짜만 읽어요.</p><div class="habit-acts"><button class="btn btn-primary btn-sm" type="button" data-act="sms-apply">읽어서 채우기</button><button class="btn btn-ghost btn-sm" type="button" data-act="sms-close">닫기</button></div></div>` : `<button class="card-link sms-open" type="button" data-act="sms-open">${icon('phone', 'sm')}결제 문자로 채우기</button>`) : ''}
     <div class="field">
       <label class="lab" for="f-amount">금액</label>
       <div class="amt"><input id="f-amount" inputmode="numeric" enterkeyhint="done" placeholder="0" value="${f.amount ? fmt(f.amount) : ''}" aria-describedby="amtHint"><span>원</span></div>
@@ -1117,9 +1130,11 @@ function txSheet() {
     <div class="field"><label class="lab" for="f-memo">내용</label><input class="input" id="f-memo" list="memoList" maxlength="40" placeholder="${f.kind === 'in' ? '예: 10월 급여' : '예: 점심, 마트 장보기'}" value="${esc(f.memo)}"><datalist id="memoList">${memoSuggestions(f.kind).map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist></div>
     <div class="field"><label class="lab" for="f-date">날짜</label><div class="field-row"><input class="input" type="date" id="f-date" value="${f.date}" required><div class="chips"><button class="chip" type="button" id="fd-0" data-act="f-day" data-d="0" ${pressed(f.date === t)}>오늘</button><button class="chip" type="button" id="fd-1" data-act="f-day" data-d="-1" ${pressed(f.date === addDays(t, -1))}>어제</button></div></div></div>
     ${f.kind === 'out' ? `<div class="field"><span class="lab" id="mLab">결제수단</span><div class="chips" role="group" aria-labelledby="mLab">${cfg().methods.map(m => `<button class="chip" type="button" id="fm-${esc(m.id)}" data-act="f-method" data-id="${esc(m.id)}" ${pressed(f.method === m.id)}>${esc(m.name)}</button>`).join('') || '<span class="muted" style="font-size:13px">설정에서 결제수단을 추가할 수 있어요</span>'}</div></div>` : ''}
+    ${f.memoId ? `<p class="sheet-note">📝 ‘${esc((S.memos[f.memoId] || {}).name || '')}’ 메모를 기록으로 옮겨요. 실제로 쓴 금액으로 고쳐서 저장하세요.</p>` : ''}
     ${f.newId ? `<p class="sheet-note">${mdLabel(f.planDate)} ${f.loan ? '대출 상환' : '정기 납부'}분으로 기록해요. 실제로 낸 금액이 다르면 고쳐서 저장하세요.</p>` : ''}
     ${f.loan && f.id ? `<p class="sheet-note">‘${esc((S.loans[f.loan] || {}).name || '삭제된 대출')}’ 상환 일정에서 자동으로 기록된 내역이에요. 지워도 다시 생기지 않아요.</p>` : ''}
     ${f.sub && f.id ? `<p class="sheet-note">‘${esc(subName(f.sub))}’ 정기결제에서 자동으로 기록된 내역이에요. 지워도 다시 생기지 않아요.</p>` : ''}
+    <p class="dup-hint" id="dupHint" role="alert"></p>
     <div class="sheet-actions">${isEdit ? `<button class="btn btn-danger" type="button" data-act="f-delete">${icon('trash')}삭제</button>` : ''}<button class="btn btn-primary btn-block" type="submit" id="f-save" ${f.amount > 0 ? '' : 'disabled'}>${isEdit ? '고친 내용 저장' : '저장하기'}</button></div>
   </form>`;
 }
@@ -1134,6 +1149,7 @@ function syncTxSheet() {
   if (amt && document.activeElement !== amt) amt.value = F.amount ? fmt(F.amount) : '';
   const hint = $('#amtHint'); if (hint) hint.textContent = F.amount >= 1e4 ? koreanWon(F.amount) : '';
   const save = $('#f-save'); if (save) save.disabled = !(F.amount > 0);
+  if (F.dupOk) { F.dupOk = false; const h = $('#dupHint'); if (h) h.textContent = ''; if (save) save.textContent = F.id ? '고친 내용 저장' : '저장하기'; }
 }
 function learnFromMemo() {
   if (!F || F.mode !== 'tx' || F.catTouched) return;
@@ -1151,6 +1167,16 @@ function saveTx() {
   const f = F;
   if (!(f.amount > 0)) { $('#f-amount').focus(); return; }
   if (!isYmd(f.date)) { toast('날짜를 확인해 주세요'); return; }
+  if (!f.id && !f.dupOk) { // same day, same amount, same memo: probably written twice
+    const k = normMemo(f.memo), amt = Math.round(f.amount);
+    const dup = txsOf(ymOf(f.date)).find(t => t.id !== f.newId && t.date === f.date && t.kind === f.kind && t.amount === amt && (k ? normMemo(t.memo) === k : !t.memo && t.cat === f.cat));
+    if (dup) {
+      F.dupOk = true;
+      const h = $('#dupHint'); if (h) h.textContent = `같은 날 같은 금액의 ‘${dup.memo || catOf(dup.cat).name}’ 기록이 이미 있어요. 두 번 적은 게 아니라면 한 번 더 눌러 저장하세요.`;
+      const b = $('#f-save'); if (b) b.textContent = '그래도 저장하기';
+      return;
+    }
+  }
   const id = f.id || f.newId || uid('t');
   const tx = makeTx({ ...f, at: f.at || Date.now() });
   const ym = ymOf(tx.date);
@@ -1161,6 +1187,9 @@ function saveTx() {
   savePrefs();
   const wasEdit = !!f.id;
   closeSheet();
+  if (f.memoId) { markMemoDone(f.memoId, id, tx.amount, tx.date); toast('기록했어요 · 메모는 ‘썼어요’로 정리했어요'); return; }
+  const mm = !wasEdit && tx.kind === 'out' && !f.newId ? matchMemo(tx) : null;
+  if (mm) { toast(`메모해 둔 ‘${mm.name}’${josa(mm.name, '을/를').slice(-1)} 산 건가요?`, { undo: () => { markMemoDone(mm.id, id, tx.amount, tx.date); toast('메모를 ‘썼어요’로 정리했어요'); }, label: '맞아요', ms: 9000 }); return; }
   toast(wasEdit ? '고쳤어요' : ym === S.ym ? '기록했어요' : `${+ym.slice(5)}월 내역에 기록했어요`);
 }
 function deleteTx() {
@@ -1715,7 +1744,7 @@ async function loadAccount() {
 }
 function backupData() {
   const settings = clone(cfg());
-  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), goals: clone(S.goals), credit: clone(S.credit), nospend: clone(S.nospend), months: clone(S.months) };
+  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), goals: clone(S.goals), credit: clone(S.credit), memos: clone(S.memos), nospend: clone(S.nospend), months: clone(S.months) };
 }
 function csvData() {
   const q = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -1800,6 +1829,8 @@ function applyRestore() {
   if (Object.keys(goalP).length) { S.goals = {}; writeGoals(goalP); }
   const credP = { ...(b.credit || {}) }; for (const k in S.credit) if (!(k in credP)) credP[k] = null;
   if (Object.keys(credP).length) writeCredit(credP);
+  const memoP = { ...(b.memos || {}) }; for (const k in S.memos) if (!(k in memoP)) memoP[k] = null;
+  if (Object.keys(memoP).length) writeMemos(memoP);
   for (const ym in (b.nospend || {})) for (const d in b.nospend[ym]) if (b.nospend[ym][d]) writeNoSpend(d, true);
   if (b.settings) saveSettings(b.settings);
   toast('백업으로 되살렸어요');
@@ -2433,7 +2464,7 @@ function vStats() {
   </section>`;
 
   const freq = `<section class="card">
-    <div class="card-h"><h2 class="card-t">자주 쓴 곳</h2></div>
+    <div class="card-h"><h2 class="card-t">자주 쓴 곳</h2><button class="card-link" type="button" data-act="go-often">반복 지출 전체${icon('right')}</button></div>
     ${D.freq.length ? `<div class="rank">${D.freq.map((f, i) => `<button class="rank-row freq" type="button" data-act="st-search" data-q="${esc(f.k)}" aria-label="${esc(f.k)} ${f.n}번 ${won(f.v)}, 내역 보기">
       <span class="emo num" aria-hidden="true">${i + 1}</span>
       <span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(f.k)}</span><span class="rank-amt">${won(f.v)}</span></span><span class="rank-sub">${esc(catOf(f.cat).name)} · ${f.n}번</span></span>
@@ -2646,15 +2677,257 @@ const loanMemo = (l, r) => (l.entry === 'quick' && l.type === 'bullet'
   ? `${l.name} ${r.prin > 0 ? '만기 상환' : '이자'}${r.prin > 0 ? ` (이자 ${fmt(r.int)}원)` : ''}`
   : `${l.name} ${r.k}회차 (이자 ${fmt(r.int)}원)`);
 
+/* ================= 쓸 돈 메모 + 자주 쓴 내역 ================= */
+// 같은 내용인지 비교할 때: 띄어쓰기·기호·대소문자를 무시해요 ("점심 " = "점심", "스타벅스!" = "스타벅스")
+const normMemo = s => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+function memosArr() {
+  const a = [];
+  for (const id in S.memos) { const m = S.memos[id]; if (m && m.name != null) a.push({ ...m, id }); }
+  return a;
+}
+const openMemos = () => memosArr().filter(m => m.status === 'plan');
+function writeMemos(patch) {
+  S.memos = { ...S.memos, ...patch };
+  scheduleRender();
+  if (!S.db) return Promise.resolve();
+  const ref = S.db.doc('meta/memos');
+  return track(enqueue('meta/memos', async () => {
+    try { await retry(() => ref.update({ items: patch })); }
+    catch (e) {
+      if (e && e.code === 'invalid_argument' && !S.memosDoc) await retry(() => ref.set({ items: patch }));
+      else throw e;
+    }
+    S.memosDoc = true;
+  }));
+}
+const memoSort = (a, b) => (a.date || '9999') < (b.date || '9999') ? -1 : (a.date || '9999') > (b.date || '9999') ? 1 : (a.at || 0) - (b.at || 0);
+// open memos that belong to a month: dated in that month, or undated (shown in the current month)
+function memosFor(ym) {
+  const cur = ymOf(todayStr());
+  return openMemos().filter(m => (m.date ? ymOf(m.date) === ym : ym === cur)).sort(memoSort);
+}
+function memoTotalThisMonth() {
+  const cur = ymOf(todayStr());
+  return sum(memosFor(cur).map(m => m.amount || 0));
+}
+
+/* --- repeated spending: same memo written two or more times --- */
+function repeatGroups(fromYm, toYm) {
+  const g = {};
+  for (const ym of Object.keys(S.months)) {
+    if (ym < fromYm || ym > toYm) continue;
+    for (const t of txsOf(ym)) {
+      if (t.kind !== 'out' || t.sub || t.loan) continue;
+      const k = normMemo(t.memo); if (!k) continue;
+      const x = g[k] || (g[k] = { k, names: {}, n: 0, total: 0, min: Infinity, max: 0, last: null, cats: {}, methods: {}, months: {} });
+      x.n++; x.total += t.amount; x.min = Math.min(x.min, t.amount); x.max = Math.max(x.max, t.amount);
+      x.names[t.memo.trim()] = (x.names[t.memo.trim()] || 0) + 1;
+      x.cats[t.cat || ''] = (x.cats[t.cat || ''] || 0) + 1;
+      if (t.method) x.methods[t.method] = (x.methods[t.method] || 0) + 1;
+      x.months[ymOf(t.date)] = (x.months[ymOf(t.date)] || 0) + 1;
+      if (!x.last || byRecent(t, x.last) < 0) x.last = t;
+    }
+  }
+  const top = o => Object.entries(o).sort((a, b) => b[1] - a[1])[0];
+  return Object.values(g).filter(x => x.n >= 2).map(x => ({
+    ...x, name: top(x.names)[0], cat: (top(x.cats) || [''])[0], method: (top(x.methods) || [''])[0], avg: x.total / x.n,
+  })).sort((a, b) => b.n - a.n || b.total - a.total);
+}
+const OFTEN_RANGES = { 1: '이번 달', 3: '최근 3개월', 6: '최근 6개월' };
+function oftenMode(ym) {
+  if (isLoading()) return emptyBox('불러오는 중이에요', '');
+  const span = S.oftenRange || 3, fromYm = addMonths(ym, -(span - 1));
+  const groups = repeatGroups(fromYm, ym);
+  let allOut = 0;
+  for (const m of Object.keys(S.months)) if (m >= fromYm && m <= ym) allOut += totals(txsOf(m)).out;
+  const seg = `<div class="seg" role="group" aria-label="기간">${Object.entries(OFTEN_RANGES).map(([k, v]) => `<button type="button" id="or-${k}" data-act="often-range" data-v="${k}" aria-pressed="${+k === span}">${v}</button>`).join('')}</div>`;
+  if (!groups.length) return `<div class="often-head">${seg}</div>` + emptyBox('아직 두 번 이상 적은 내용이 없어요', '같은 내용(예: 점심, 스타벅스)으로 두 번 넘게 적으면 여기에 모여요. 다시 적을 때도 한 번에 채울 수 있어요.');
+  const rep = sum(groups.map(x => x.total)), maxN = groups[0].n;
+  const range = `${+fromYm.slice(5)}월~${+ym.slice(5)}월`;
+  return `<div class="often-head">${seg}</div>
+    <div class="often-sum">
+      <div><span class="stat-l">반복해서 쓴 지출</span><span class="kpi-v">${groups.length}<small>가지</small></span><span class="kpi-s">${span === 1 ? mLabel(ym) : range}</span></div>
+      <div><span class="stat-l">합계</span><span class="kpi-v">${won(rep)}</span><span class="kpi-s">전체 지출의 ${share(rep, allOut)}</span></div>
+      <div><span class="stat-l">가장 자주</span><span class="kpi-v often-top">${esc(groups[0].name)}</span><span class="kpi-s">${groups[0].n}번 · 평균 ${won(groups[0].avg)}</span></div>
+    </div>
+    <div class="rank often-list">${groups.slice(0, 30).map((x, i) => {
+      const c = catOf(x.cat);
+      const spread = x.min === x.max ? `매번 ${won(x.min)}` : `${won(x.min)}~${won(x.max)}`;
+      return `<div class="often-row">
+        <span class="emo" aria-hidden="true">${esc(c.emoji)}</span>
+        <span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(x.name)}</span><span class="rank-amt">${won(x.total)}</span></span><span class="bar"><span style="width:${(x.n / maxN * 100).toFixed(1)}%"></span></span><span class="rank-sub"><b>${x.n}번</b> · 평균 ${won(x.avg)} · ${spread} · 마지막 ${mdLabel(x.last.date)}</span></span>
+        <div class="often-acts"><button class="btn btn-soft btn-sm" type="button" data-act="often-again" data-k="${esc(x.k)}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus', 'sm')}다시 기록</button><button class="btn btn-ghost btn-sm" type="button" data-act="st-search" data-q="${esc(x.name)}">내역 보기</button></div>
+      </div>`;
+    }).join('')}</div>
+    <p class="set-note" style="margin-top:12px">띄어쓰기나 기호가 달라도 같은 내용으로 모아요. 정기결제·대출 자동 기록은 빼고 셌어요.</p>`;
+}
+function againFromGroup(k) {
+  const span = S.oftenRange || 3, ym = S.ym;
+  const x = repeatGroups(addMonths(ym, -(span - 1)), ym).find(g => g.k === k) || repeatGroups('0000-00', '9999-99').find(g => g.k === k);
+  if (!x) return;
+  openTxSheet({});
+  if (!F || F.mode !== 'tx') return;
+  Object.assign(F, { kind: 'out', memo: x.name, amount: x.last.amount, cat: x.cat || F.cat, method: x.method || x.last.method || F.method, catTouched: true, date: todayStr() });
+  rerenderSheet(txSheet());
+  const a = $('#f-amount'); if (a) { a.focus(); a.select(); }
+}
+// chips at the top of a new record: the things written most often lately
+function oftenChips() {
+  const ym = ymOf(todayStr());
+  return repeatGroups(addMonths(ym, -2), ym).slice(0, 6);
+}
+
+/* --- 쓸 돈 메모 sheet --- */
+function openMemoSheet(id, date) {
+  if (S.mode === 'denied') return;
+  const m = id && S.memos[id];
+  if (id && !m) return;
+  F = m
+    ? { mode: 'memo', id, name: m.name || '', amount: m.amount || 0, cat: m.cat || lastCat('out'), date: m.date || '', note: m.note || '', ex: !!m.ex, at: m.at || 0 }
+    : { mode: 'memo', id: null, name: '', amount: 0, cat: lastCat('out'), date: isYmd(date) ? date : '', note: '', ex: false, at: 0 };
+  showSheet(memoSheet(), m ? null : '#m-name');
+}
+const canSaveMemo = () => !!(F && F.name.trim());
+function memoHints() {
+  const f = F, k = normMemo(f.name);
+  if (!k) return '';
+  const out = [];
+  const dup = openMemos().find(m => m.id !== f.id && normMemo(m.name) === k);
+  if (dup) out.push(`<div class="memo-hint warn">${icon('alert', 'sm')}<span>이미 ‘${esc(dup.name)}’ 메모가 있어요 (${dup.date ? mdLabel(dup.date) : '날짜 미정'} · ${won(dup.amount || 0)}).</span><button class="card-link" type="button" data-act="memo-edit" data-id="${esc(dup.id)}">그 메모 고치기</button></div>`);
+  const past = repeatGroups('0000-00', '9999-99').find(g => g.k === k) || (() => {
+    const hit = allTxs().find(t => t.kind === 'out' && normMemo(t.memo) === k);
+    return hit ? { n: 1, avg: hit.amount, last: hit, cat: hit.cat } : null;
+  })();
+  if (past) out.push(`<div class="memo-hint">${icon('repeat', 'sm')}<span>지금까지 ${past.n}번 썼어요 · ${past.n > 1 ? `평균 ${won(past.avg)}` : won(past.avg)} · 마지막 ${mdLabel(past.last.date)}</span>${f.amount ? '' : `<button class="card-link" type="button" data-act="memo-fill" data-v="${Math.round(past.avg)}" data-cat="${esc(past.cat || '')}">그 금액으로 채우기</button>`}</div>`);
+  return out.join('');
+}
+function memoSheet() {
+  const f = F, isEdit = !!f.id, t = todayStr();
+  const sat = (() => { const d = parseD(t), add = (6 - d.getDay() + 7) % 7 || 7; return addDays(t, add); })();
+  return `<form id="memoForm" autocomplete="off" novalidate>
+    <div class="sheet-h"><h2 id="sheetTitle">${isEdit ? '쓸 돈 메모 고치기' : '쓸 돈 메모'}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    <p class="set-note">앞으로 쓸 돈을 미리 적어 두면 남은 예산에서 빼고 보여 드려요. 실제로 쓰면 ‘썼어요’로 바로 기록이 돼요.</p>
+    <div class="field"><label class="lab" for="m-name">무엇을 살 건가요?</label><input class="input" id="m-name" list="memoList2" maxlength="40" placeholder="예: 겨울 패딩, 친구 생일 선물" value="${esc(f.name)}"><datalist id="memoList2">${memoSuggestions('out').map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist><div id="memoHints" aria-live="polite">${memoHints()}</div></div>
+    <div class="field"><label class="lab" for="m-amount">얼마쯤 쓸까요? <span class="muted" style="font-weight:400">(대략이어도 괜찮아요)</span></label><div class="amt"><input id="m-amount" inputmode="numeric" placeholder="0" value="${f.amount ? fmt(f.amount) : ''}"><span>원</span></div></div>
+    <div class="field"><span class="lab" id="mcLab">카테고리</span><div class="cat-grid" role="group" aria-labelledby="mcLab">${catsOf('out').map(c => `<button class="cat-opt" type="button" id="mc-${esc(c.id)}" data-act="memo-cat" data-id="${esc(c.id)}" ${pressed(f.cat === c.id)}><span class="e" aria-hidden="true">${esc(c.emoji)}</span>${esc(c.name)}</button>`).join('')}</div></div>
+    <div class="field"><label class="lab" for="m-date">언제 쓸까요?</label><div class="field-row"><input class="input" type="date" id="m-date" value="${f.date}" min="${isEdit ? '' : t}"><div class="chips"><button class="chip" type="button" data-act="memo-date" data-v="${sat}" ${pressed(f.date === sat)}>이번 주말</button><button class="chip" type="button" data-act="memo-date" data-v="" ${pressed(!f.date)}>날짜 미정</button></div></div></div>
+    <div class="field"><label class="lab" for="m-note">메모 <span class="muted" style="font-weight:400">(선택)</span></label><input class="input" id="m-note" maxlength="60" placeholder="예: 블랙프라이데이 때 사기" value="${esc(f.note)}"></div>
+    <div class="sheet-actions">${isEdit ? `<button class="btn btn-danger" type="button" data-act="memo-delete">${icon('trash')}삭제</button>` : ''}<button class="btn btn-primary btn-block" type="submit" id="m-save" ${canSaveMemo() ? '' : 'disabled'}>${isEdit ? '고친 내용 저장' : '메모하기'}</button></div>
+  </form>`;
+}
+function refreshMemoHints() {
+  const h = $('#memoHints'); if (h) h.innerHTML = memoHints();
+  const s = $('#m-save'); if (s) s.disabled = !canSaveMemo();
+}
+function saveMemo() {
+  const f = F;
+  if (!canSaveMemo()) return;
+  const id = f.id || uid('m'), prev = f.id ? S.memos[f.id] : null;
+  const m = { name: f.name.trim().slice(0, 40), amount: Math.round(f.amount || 0), cat: f.cat, date: isYmd(f.date) ? f.date : '', note: f.note.trim().slice(0, 60), status: prev ? prev.status : 'plan', tx: prev ? prev.tx || '' : '', spent: prev ? prev.spent || 0 : 0, doneAt: prev ? prev.doneAt || '' : '', ex: !!f.ex, at: f.at || Date.now() };
+  writeMemos({ [id]: m });
+  closeSheet();
+  toast(f.id ? '고쳤어요' : `‘${m.name}’ 메모했어요${m.date ? ` · ${mdLabel(m.date)}` : ''}`);
+}
+function deleteMemo() {
+  const f = F, prev = S.memos[f.id];
+  closeSheet();
+  if (!prev) return;
+  writeMemos({ [f.id]: null });
+  toast('메모를 지웠어요', { undo: () => writeMemos({ [f.id]: prev }) });
+}
+// 썼어요: the memo becomes a real record (amount can be corrected before saving)
+function spendMemo(id) {
+  const m = S.memos[id];
+  if (!m || S.mode === 'denied') return;
+  const t = todayStr();
+  openTxSheet({});
+  if (!F || F.mode !== 'tx') return;
+  Object.assign(F, { kind: 'out', memo: m.name, amount: m.amount || 0, cat: m.cat || F.cat, catTouched: true, date: m.date && m.date <= t ? m.date : t, memoId: id });
+  rerenderSheet(txSheet());
+  const a = $('#f-amount'); if (a) { a.focus(); a.select(); }
+}
+function dropMemo(id) {
+  const m = S.memos[id];
+  if (!m) return;
+  writeMemos({ [id]: { ...m, status: 'drop', doneAt: todayStr() } });
+  refreshDaySheet();
+  toast(`‘${m.name}’ 안 사기로 했어요${m.amount ? ` · ${won(m.amount)} 아꼈어요` : ''}`, { undo: () => { writeMemos({ [id]: m }); refreshDaySheet(); } });
+}
+function markMemoDone(id, txId, amount, date) {
+  const m = S.memos[id];
+  if (!m) return;
+  writeMemos({ [id]: { ...m, status: 'done', tx: txId, spent: amount, doneAt: date } });
+}
+// after a hand-written record: is it the thing that was on the list?
+function matchMemo(tx) {
+  const k = normMemo(tx.memo);
+  if (!k) return null;
+  return openMemos().find(m => {
+    const mk = normMemo(m.name);
+    if (!mk || !(mk === k || (mk.length >= 2 && k.includes(mk)) || (k.length >= 2 && mk.includes(k)))) return false;
+    return !m.date || Math.abs(diffDays(m.date, tx.date)) <= 31;
+  }) || null;
+}
+function memoRow(m, compact) {
+  const t = todayStr(), c = catOf(m.cat);
+  const when = m.date ? `${mdw(m.date)}${m.date >= t ? ` · ${ddayText(m.date)}` : ' · 지났어요'}` : '날짜 미정';
+  return `<div class="plan-row memo-row${m.date && m.date < t ? ' late' : ''}">
+    <span class="emo" aria-hidden="true">${esc(c.emoji)}</span>
+    <span class="tx-main"><span class="tx-title">${esc(m.name)}<span class="tag plan">메모</span>${m.ex ? '<span class="tag">예시</span>' : ''}</span><span class="tx-sub">${esc(when)}${m.note ? ' · ' + esc(m.note) : ''}</span></span>
+    <span class="tx-amt plan-amt">${m.amount ? won(m.amount) : '금액 미정'}</span>
+    <div class="plan-acts">
+      <button class="btn btn-primary btn-sm" type="button" data-act="memo-spend" data-id="${esc(m.id)}" ${S.mode === 'denied' ? 'disabled' : ''}>썼어요</button>
+      <button class="btn btn-soft btn-sm" type="button" data-act="memo-drop" data-id="${esc(m.id)}" ${S.mode === 'denied' ? 'disabled' : ''}>안 사기로 했어요</button>
+      ${compact ? '' : `<button class="btn btn-ghost btn-sm" type="button" data-act="memo-edit" data-id="${esc(m.id)}">고치기</button>`}
+    </div>
+  </div>`;
+}
+function memoBlock(date) {
+  const items = openMemos().filter(m => m.date === date);
+  if (!items.length) return '';
+  return `<div class="plan-box memo-box"><p class="plan-h">📝 쓸 돈 메모 <span class="muted">${items.length}건 · ${won(sum(items.map(m => m.amount || 0)))}</span></p>${items.map(m => memoRow(m, true)).join('')}</div>`;
+}
+function planMode(ym) {
+  if (isLoading()) return emptyBox('불러오는 중이에요', '');
+  const t = todayStr(), cur = ymOf(t), list = memosFor(ym);
+  const dated = list.filter(m => m.date), undated = list.filter(m => !m.date);
+  const planned = sum(list.map(m => m.amount || 0));
+  const bs = budgetSummary(ym, totals(txsOf(ym)).out);
+  const closed = memosArr().filter(m => m.status !== 'plan' && m.doneAt && ymOf(m.doneAt) === ym).sort((a, b) => (a.doneAt < b.doneAt ? 1 : -1));
+  const done = closed.filter(m => m.status === 'done'), dropped = closed.filter(m => m.status === 'drop');
+  const savedByDrop = sum(dropped.map(m => m.amount || 0));
+  const diff = sum(done.filter(m => m.amount).map(m => m.amount - (m.spent || 0)));
+  let budgetLine = '';
+  if (bs && ym >= cur && planned) {
+    const left = bs.left - planned;
+    budgetLine = left >= 0 ? `메모한 돈까지 쓰면 예산이 <b>${won(left)}</b> 남아요.` : `메모한 돈까지 쓰면 예산보다 <b>${won(-left)}</b> 넘어요. 미룰 수 있는 건 다음 달로 옮겨 보세요.`;
+  }
+  const head = `<div class="memo-top">
+      <div><span class="stat-l">${ym === cur ? '이번 달 쓸 돈 메모' : `${mLabel(ym)} 쓸 돈 메모`}</span><span class="kpi-v">${won(planned)}</span><span class="kpi-s">${list.length}건${undated.length ? ` · 날짜 미정 ${undated.length}건 포함` : ''}</span></div>
+      <button class="btn btn-primary btn-sm" type="button" data-act="memo-add" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}메모하기</button>
+    </div>${budgetLine ? `<p class="bud-foot">${budgetLine}</p>` : ''}`;
+  if (!list.length && !closed.length) return head + emptyBox(ym < cur ? `${mLabel(ym)}에 메모한 지출이 없어요` : '아직 메모한 지출이 없어요', '사고 싶은 것, 곧 낼 돈을 적어 두세요. 같은 걸 또 적으면 알려 드리고, 실제로 쓰면 한 번에 기록으로 옮겨요.');
+  const sec = (title, arr) => arr.length ? `<p class="memo-sec">${title}</p>${arr.map(m => memoRow(m)).join('')}` : '';
+  const closedRows = closed.map(m => {
+    const c = catOf(m.cat), d = m.status === 'done' && m.amount ? m.amount - (m.spent || 0) : 0;
+    const res = m.status === 'drop' ? `안 사기로 했어요${m.amount ? ` · ${won(m.amount)} 아낌` : ''}` : `${won(m.spent || 0)} 썼어요${m.amount ? (d > 0 ? ` · 메모보다 ${won(d)} 덜` : d < 0 ? ` · 메모보다 ${won(-d)} 더` : ' · 메모대로') : ''}`;
+    return `<div class="tx memo-closed"><span class="emo" aria-hidden="true">${esc(c.emoji)}</span><span class="tx-main"><span class="tx-title">${esc(m.name)}</span><span class="tx-sub">${mdLabel(m.doneAt)} · ${esc(res)}</span></span><button class="icon-btn" type="button" data-act="memo-undo" data-id="${esc(m.id)}" aria-label="${esc(m.name)} 다시 메모로 돌리기">${icon('repeat')}</button></div>`;
+  }).join('');
+  return head + `<div class="memo-list">${sec('날짜 정한 것', dated)}${sec('날짜 미정', undated)}</div>`
+    + (closed.length ? `<div class="memo-done"><p class="memo-sec">${mLabel(ym)}에 끝낸 메모 <span class="muted">${done.length ? `썼어요 ${done.length}건` : ''}${done.length && dropped.length ? ' · ' : ''}${dropped.length ? `안 사기로 ${dropped.length}건` : ''}</span></p>
+      ${savedByDrop || diff ? `<p class="bud-foot">${savedByDrop ? `안 사기로 해서 <b>${won(savedByDrop)}</b> 아꼈어요. ` : ''}${diff > 0 ? `산 것도 메모보다 ${won(diff)} 덜 썼어요.` : diff < 0 ? `산 것은 메모보다 ${won(-diff)} 더 썼어요.` : ''}</p>` : ''}
+      ${closedRows}</div>` : '');
+}
+
 /* ================= toast ================= */
 let toastTimer = 0, toastUndo = null;
 function toast(msg, opts = {}) {
   const el = $('#toast');
   toastUndo = opts.undo || null;
-  el.innerHTML = `<span>${esc(msg)}</span>${toastUndo ? '<button type="button" data-act="toast-undo">되돌리기</button>' : ''}`;
+  el.innerHTML = `<span>${esc(msg)}</span>${toastUndo ? `<button type="button" data-act="toast-undo">${esc(opts.label || '되돌리기')}</button>` : ''}`;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, toastUndo ? 6000 : 2600);
+  toastTimer = setTimeout(hideToast, opts.ms || (toastUndo ? 6000 : 2600));
 }
 function hideToast() { $('#toast').hidden = true; toastUndo = null; }
 
@@ -2679,6 +2952,7 @@ function onMoneyInput(el) {
   else if (el.id === 'g-monthly') { F.monthly = v; refreshGoalSheet(); }
   else if (el.id === 'dep-amount') { F.amount = v; $('#dep-save').disabled = !(v > 0); }
   else if (el.id === 'su-income' || el.id === 'su-fixed') { F[el.id === 'su-income' ? 'income' : 'fixed'] = v; const pl = document.createElement('div'); pl.innerHTML = setupSheet(); const np = pl.querySelector('#suPlan'); if (np) $('#suPlan').innerHTML = np.innerHTML; $('#su-save').disabled = !(F.income > 0 && F.income > F.fixed); }
+  else if (el.id === 'm-amount') { F.amount = v; refreshMemoHints(); }
   else if (el.id === 'q-principal') { F.principal = v; $('#qpHint').textContent = v >= 1e4 ? koreanWon(v) : '처음 빌린 금액이 아니라 오늘 기준으로 남은 금액이에요.'; refreshQuick(); }
   else if (el.id === 'q-pay') { F.pay = v; refreshQuick(); }
   else if (el.id === 'q-int') { F.int = v; refreshQuick(); }
@@ -2699,6 +2973,20 @@ const ACT = {
   'edit-sub': el => openSubSheet(el.dataset.id),
   'add-sub': () => openSubSheet(null),
   'add-bill': el => openBillSheet(el.dataset.date),
+  'memo-add': el => openMemoSheet(null, el.dataset.date),
+  'memo-edit': el => openMemoSheet(el.dataset.id),
+  'memo-spend': el => spendMemo(el.dataset.id),
+  'memo-drop': el => dropMemo(el.dataset.id),
+  'memo-delete': () => deleteMemo(),
+  'memo-undo': el => { const m = S.memos[el.dataset.id]; if (!m) return; writeMemos({ [el.dataset.id]: { ...m, status: 'plan', tx: '', spent: 0, doneAt: '' } }); toast('다시 메모로 돌렸어요'); },
+  'memo-cat': el => { F.cat = el.dataset.id; for (const b of document.querySelectorAll('#sheet [data-act="memo-cat"]')) b.setAttribute('aria-pressed', String(b.dataset.id === F.cat)); },
+  'memo-date': el => { F.date = el.dataset.v; rerenderSheet(memoSheet()); },
+  'memo-fill': el => { F.amount = +el.dataset.v || 0; if (el.dataset.cat && catsOf('out').some(c => c.id === el.dataset.cat)) F.cat = el.dataset.cat; rerenderSheet(memoSheet()); },
+  'often-range': el => { S.oftenRange = +el.dataset.v; renderView(); },
+  'often-again': el => againFromGroup(el.dataset.k),
+  'f-often': el => { const x = oftenChips().find(g => g.k === el.dataset.k); if (!x) return; Object.assign(F, { memo: x.name, cat: x.cat || F.cat, method: x.method || F.method, catTouched: true }); if (!F.amount) F.amount = x.last.amount; rerenderSheet(txSheet()); const a = $('#f-amount'); if (a) { a.focus(); a.select(); } },
+  'go-memos': () => { S.listMode = 'plan'; prefs.listMode = 'plan'; savePrefs(); go('list'); },
+  'go-often': () => { S.listMode = 'often'; prefs.listMode = 'often'; savePrefs(); go('list'); },
   'plan-pay': el => payPlan(el.dataset.id, el.dataset.date),
   'plan-skip': el => skipPlan(el.dataset.id, el.dataset.date),
   'sub-filter': el => { S.subFilter = el.dataset.v; renderView(); },
@@ -2824,7 +3112,7 @@ document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'flt-q') { S.filter.q = el.value; updateListResults(); return; }
   if (el.id === 'ai-q') { S.aiDraft = el.value; return; }
-  if (el.id === 'f-amount' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || el.id === 'q-principal' || el.id === 'q-pay' || el.id === 'q-int' || el.id === 'g-target' || el.id === 'g-monthly' || el.id === 'dep-amount' || el.id === 'su-income' || el.id === 'su-fixed' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
+  if (el.id === 'f-amount' || el.id === 'm-amount' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || el.id === 'q-principal' || el.id === 'q-pay' || el.id === 'q-int' || el.id === 'g-target' || el.id === 'g-monthly' || el.id === 'dep-amount' || el.id === 'su-income' || el.id === 'su-fixed' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
   if (F && F.mode === 'goal') {
     if (el.id === 'g-name') F.name = el.value;
     else if (el.id === 'g-emoji') F.emoji = el.value;
@@ -2845,6 +3133,7 @@ document.addEventListener('input', e => {
     return;
   }
   if (!F) return;
+  if (F.mode === 'memo') { if (el.id === 'm-name') { F.name = el.value; refreshMemoHints(); } else if (el.id === 'm-note') F.note = el.value; return; }
   if (el.id === 'f-memo') { F.memo = el.value; if (!F.catTouched) $('#learnHint').textContent = ''; }
   else if (el.id === 's-name') { F.name = el.value; $('#s-save').disabled = !canSaveSub(); }
   else if (el.id === 's-emoji') F.emoji = el.value;
@@ -2860,6 +3149,7 @@ document.addEventListener('change', e => {
   switch (el.id) {
     case 'f-memo': F.memo = el.value; learnFromMemo(); break;
     case 'f-date': if (isYmd(el.value)) { F.date = el.value; syncTxSheet(); } break;
+    case 'm-date': F.date = isYmd(el.value) ? el.value : ''; rerenderSheet(memoSheet()); break;
     case 's-day': F.day = +el.value; rerenderSheet(subSheet()); break;
     case 's-month': F.month = +el.value; rerenderSheet(subSheet()); break;
     case 's-cat': F.cat = el.value; break;
@@ -2893,6 +3183,7 @@ document.addEventListener('submit', e => {
   else if (F.mode === 'goal') saveGoal();
   else if (F.mode === 'setup') saveSetup();
   else if (F.mode === 'dep') saveDep();
+  else if (F.mode === 'memo') saveMemo();
   else if (F.mode === 'ai') { const q = $('#ai-q'); if (q) askAi(q.value); }
 });
 document.addEventListener('keydown', e => {

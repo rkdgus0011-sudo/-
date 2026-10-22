@@ -748,6 +748,43 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-varian
 .q-prev { color: var(--warn-ink); }
 .q-prev.ok { color: var(--ink-2); }
 
+/* 쓸 돈 메모 · 자주 쓴 것 */
+.list-seg button { padding-inline: 10px; }
+@media (max-width: 560px) { .list-seg { width: 100%; } }
+.cal-cell .d .cm { font-style: normal; font-size: 10px; margin-left: 2px; }
+.cm-key { margin-left: 8px; font-size: 11.5px; }
+.memo-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.memo-sec { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 18px 0 2px; }
+.memo-sec .muted { font-weight: 400; margin-left: 4px; }
+.memo-list .plan-row + .memo-sec { margin-top: 18px; }
+.memo-row.late .tx-sub { color: var(--warn-ink); }
+.memo-done { margin-top: 10px; padding-top: 4px; border-top: 1px solid var(--line); }
+.memo-closed .tx-title { color: var(--ink-2); }
+.memo-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); font-size: 13px; color: var(--ink-2); }
+.memo-hint.warn { box-shadow: inset 0 0 0 1px var(--warn); color: var(--ink); }
+.memo-hint .i { flex: none; }
+.memo-hint span { flex: 1 1 180px; }
+.memo-foot { margin-top: 6px; }
+.memo-box { background: color-mix(in srgb, var(--warn) 7%, var(--surface-2)); }
+.plan-links { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.day-acts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.day-acts .btn-primary { grid-column: 1 / -1; }
+.often-head { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.often-sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+@media (max-width: 560px) { .often-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); } .often-sum > div:last-child { grid-column: 1 / -1; } .often-head .seg { width: 100%; } }
+.often-top { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.often-row { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 6px 12px; align-items: center; padding: 10px 0; }
+.often-row + .often-row { border-top: 1px solid var(--line); }
+.often-row .rank-sub b { color: var(--ink); font-weight: 600; }
+.often-acts { grid-column: 2; display: flex; gap: 6px; flex-wrap: wrap; }
+.often-chips { display: grid; gap: 6px; }
+.often-chips .lab { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.often-chips .chips { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.often-chips .chip { white-space: nowrap; flex: none; }
+.often-chips small { color: var(--muted); font-size: 11.5px; margin-left: 2px; }
+.dup-hint { font-size: 13px; color: var(--warn-ink); line-height: 1.5; }
+.dup-hint:empty { display: none; }
+
 /* ---------- web version: page base + sign-in screen ---------- */
 :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 body { margin: 0; }
