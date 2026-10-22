@@ -31,7 +31,7 @@ const DEFAULT_METHODS = [
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const UNKNOWN_CAT = { id: '', name: '미분류', emoji: '🏷️', kind: 'out' };
 const BACKFILL_DAYS = 92; // auto-record never reaches further back than this
-const VIEW_NAMES = ['home', 'list', 'subs', 'goals', 'loans', 'credit', 'stats', 'budget', 'settings'];
+const VIEW_NAMES = ['home', 'list', 'subs', 'accounts', 'goals', 'loans', 'credit', 'stats', 'budget', 'settings'];
 
 /* ================= utils ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -110,7 +110,8 @@ const S = {
   goalsDoc: false,
   nospend: {},                // 'YYYY-MM' -> { 'YYYY-MM-DD': true } (무지출로 체크한 날)
   credit: {}, creditDoc: false,
-  memos: {}, memosDoc: false,   // 쓸 돈 메모: memoId -> memo | null
+  memos: {}, memosDoc: false,
+  accts: {}, acctsDoc: false,   // 통장: acctId -> account | null   // 쓸 돈 메모: memoId -> memo | null
   loaded: { months: false, meta: false },
   definitive: { months: false, meta: false },
   pending: 0, syncError: false, storeError: false,
@@ -171,7 +172,7 @@ function txsOf(ym) {
 const allTxs = () => Object.keys(S.months).flatMap(txsOf).sort(byRecent);
 function totals(list) {
   let i = 0, o = 0;
-  for (const t of list) { if (t.kind === 'in') i += t.amount; else o += t.amount; }
+  for (const t of list) { if (t.kind === 'in') i += t.amount; else if (t.kind !== 'move') o += t.amount; }
   return { in: i, out: o };
 }
 function allKeys() {
@@ -184,12 +185,14 @@ function findTx(id) {
   return null;
 }
 function makeTx(t) {
-  const kind = t.kind === 'in' ? 'in' : 'out';
-  return {
-    date: t.date, kind, amount: Math.round(t.amount), cat: t.cat || '',
-    memo: String(t.memo || '').trim().slice(0, 40), method: kind === 'in' ? '' : (t.method || ''),
+  const kind = t.kind === 'in' ? 'in' : t.kind === 'move' ? 'move' : 'out';
+  const o = {
+    date: t.date, kind, amount: Math.round(t.amount), cat: kind === 'move' ? '' : t.cat || '',
+    memo: String(t.memo || '').trim().slice(0, 40), method: kind === 'out' ? (t.method || '') : '',
     sub: t.sub || '', loan: t.loan || '', ex: !!t.ex, at: t.at || Date.now(),
   };
+  if (kind === 'move') { o.from = t.from || ''; o.to = t.to || ''; } else if (t.acct) o.acct = t.acct;
+  return o;
 }
 
 /* ================= subscriptions ================= */
@@ -338,6 +341,7 @@ function hasExamples() {
   for (const id in S.goals) if (S.goals[id] && S.goals[id].ex) return true;
   for (const id in S.credit) if (S.credit[id] && S.credit[id].ex) return true;
   for (const id in S.memos) if (S.memos[id] && S.memos[id].ex) return true;
+  for (const id in S.accts) if (S.accts[id] && S.accts[id].ex) return true;
   for (const ym in S.months) for (const id in S.months[ym]) { const t = S.months[ym][id]; if (t && t.ex) return true; }
   return false;
 }
@@ -372,6 +376,9 @@ function clearExamples() {
   const mp = {};
   for (const id in S.memos) if (S.memos[id] && S.memos[id].ex) mp[id] = null;
   if (Object.keys(mp).length) writeMemos(mp);
+  const ap = {};
+  for (const id in S.accts) if (S.accts[id] && S.accts[id].ex) ap[id] = null;
+  if (Object.keys(ap).length) writeAccts(ap);
   if (cfg().budgetEx) saveSettings({ ...cfg(), budget: { total: 0, cats: {} }, budgetEx: false });
 }
 
@@ -396,7 +403,7 @@ function startLive(db) {
     onData();
   }, onStoreError);
   db.collection('meta').onSnapshot(snap => {
-    let st = null, subs = {}, subsDoc = false, loans = {}, loansDoc = false, sawGoals = false, sawCredit = false, sawMemos = false;
+    let st = null, subs = {}, subsDoc = false, loans = {}, loansDoc = false, sawGoals = false, sawCredit = false, sawMemos = false, sawAccts = false;
     for (const d of snap.docs) {
       const data = d.data() || {};
       if (d.id === 'settings') st = data;
@@ -404,10 +411,12 @@ function startLive(db) {
       else if (d.id === 'loans') { loans = { ...(data.items || {}) }; loansDoc = true; }
       else if (d.id === 'goals') { S.goals = { ...(data.items || {}) }; S.goalsDoc = true; sawGoals = true; }
       else if (d.id === 'credit') { S.credit = { ...(data.items || {}) }; S.creditDoc = true; sawCredit = true; }
+      else if (d.id === 'accounts') { S.accts = { ...(data.items || {}) }; S.acctsDoc = true; sawAccts = true; }
       else if (d.id === 'memos') { S.memos = { ...(data.items || {}) }; S.memosDoc = true; sawMemos = true; }
     }
     if (!sawCredit) { S.credit = {}; S.creditDoc = false; }
     if (!sawMemos) { S.memos = {}; S.memosDoc = false; }
+    if (!sawAccts) { S.accts = {}; S.acctsDoc = false; }
     if (!sawGoals) { S.goals = {}; S.goalsDoc = false; }
     S.settings = st ? normSettings(st) : null; S.subs = subs; S.subsDoc = subsDoc; S.loans = loans; S.loansDoc = loansDoc; S.loaded.meta = true;
     if (st) applyTheme(S.settings.theme);
@@ -486,7 +495,7 @@ function typingInView() {
   const a = document.activeElement;
   return !!a && $view.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(button|checkbox|radio|range|submit)$/.test(a.type)));
 }
-const VIEWS = { home: vHome, list: vList, subs: vSubs, goals: vGoals, loans: vLoans, credit: vCredit, stats: vStats, budget: vBudget, settings: vSettings };
+const VIEWS = { home: vHome, list: vList, subs: vSubs, accounts: vAccounts, goals: vGoals, loans: vLoans, credit: vCredit, stats: vStats, budget: vBudget, settings: vSettings };
 function renderView() {
   if (typingInView()) { deferred = true; return; } // never yank a field out from under the cursor
   deferred = false;
@@ -505,6 +514,10 @@ document.addEventListener('focusout', () => setTimeout(() => { if (deferred && !
 
 /* ---------- shared pieces ---------- */
 function txRow(t) {
+  if (t.kind === 'move') {
+    const a = acctOf(t.from), b = acctOf(t.to);
+    return `<button class="tx" type="button" data-act="edit-tx" data-id="${esc(t.id)}"><span class="emo" aria-hidden="true">⇄</span><span class="tx-main"><span class="tx-title">${esc(t.memo || '통장 이체')}<span class="tag plan">이체</span>${t.ex ? '<span class="tag">예시</span>' : ''}</span><span class="tx-sub">${esc(`${a ? a.name : '알 수 없는 통장'} → ${b ? b.name : '알 수 없는 통장'}`)}</span></span><span class="tx-amt move">${won(t.amount)}</span></button>`;
+  }
   const c = catOf(t.cat), m = t.kind === 'out' ? methodOf(t.method) : null;
   const sub = [c.name]; if (m) sub.push(m.name);
   return `<button class="tx" type="button" data-act="edit-tx" data-id="${esc(t.id)}">
@@ -672,7 +685,7 @@ function vHome() {
 
   return `<div class="cols">
     <div class="col">${hero}${calCard}${homeReportCard()}${pace}${recent}</div>
-    <div class="col">${budget}${homeHabitCard()}${homeGoalsCard()}${cats}${upc}${meth}</div>
+    <div class="col">${budget}${homeAcctCard()}${homeHabitCard()}${homeGoalsCard()}${cats}${upc}${meth}</div>
   </div>`;
 }
 
@@ -803,6 +816,7 @@ function applyFilter(list) {
   return list.filter(t => (f.kind === 'all' || t.kind === f.kind)
     && (!f.cat || t.cat === f.cat)
     && (!f.method || t.method === f.method)
+    && (!f.acct || (t.kind === 'move' ? t.from === f.acct || t.to === f.acct : txAcct(t) === f.acct))
     && (!q || (t.memo || '').toLowerCase().includes(q) || catOf(t.cat).name.toLowerCase().includes(q)));
 }
 function sumBar(list) {
@@ -824,6 +838,7 @@ function vList() {
       <div class="seg" role="group" aria-label="수입·지출 구분">${[['all', '전체'], ['out', '지출'], ['in', '수입']].map(([k, l]) => `<button type="button" id="fk-${k}" data-act="kind-filter" data-kind="${k}" aria-pressed="${f.kind === k}">${l}</button>`).join('')}</div>
       <select class="input" id="flt-cat" aria-label="카테고리로 거르기">${catOpts}</select>
       <select class="input" id="flt-method" aria-label="결제수단으로 거르기">${mOpts}</select>
+      ${acctsArr().length ? `<select class="input" id="flt-acct" aria-label="통장으로 거르기">${opt('', '통장 전체', f.acct || '')}${acctsArr().map(a => opt(a.id, a.name, f.acct || '')).join('')}</select>` : ''}
       <label class="search">${icon('search')}<span class="sr-only">내용 검색</span><input class="input" id="flt-q" type="search" placeholder="내용 검색" value="${esc(f.q)}" autocomplete="off"></label>
     </div>
     <section class="card sumbar" id="listSum" aria-label="거른 내역 합계">${sumBar(list)}</section>
@@ -837,7 +852,7 @@ function updateListResults() {
   sumEl.innerHTML = sumBar(list);
   res.innerHTML = S.listMode === 'cal' ? calView(S.ym, list) : listView(all, list);
 }
-const filtersOn = () => S.filter.kind !== 'all' || S.filter.cat || S.filter.method || S.filter.q.trim();
+const filtersOn = () => S.filter.kind !== 'all' || S.filter.cat || S.filter.method || S.filter.acct || S.filter.q.trim();
 function listView(all, list) {
   if (isLoading()) return emptyBox('불러오는 중이에요', '');
   if (!all.length) return emptyBox(`${mLabel(S.ym)} 기록이 아직 없어요`, '오늘 쓴 돈부터 적어 볼까요?', `<button class="btn btn-primary btn-sm" type="button" data-act="add">${icon('plus')}기록하기</button>`);
@@ -855,6 +870,7 @@ function calGrid(ym, list, o) {
   const first = parseD(ym + '-01').getDay(), n = daysIn(ym), t = todayStr();
   const by = {};
   for (const x of list) {
+    if (x.kind === 'move') continue;
     const d = +x.date.slice(8), e = by[d] || (by[d] = { in: 0, out: 0, cats: {} });
     e[x.kind] += x.amount;
     if (x.kind === 'out') e.cats[x.cat || ''] = (e.cats[x.cat || ''] || 0) + x.amount;
@@ -1104,7 +1120,7 @@ function openTxSheet({ id, date } = {}) {
   if (id && !hit) return;
   if (hit) {
     const t = hit.t;
-    F = { mode: 'tx', id, origYm: hit.ym, kind: t.kind === 'in' ? 'in' : 'out', amount: t.amount, cat: t.cat, memo: t.memo || '', date: t.date, method: t.method || '', sub: t.sub || '', loan: t.loan || '', ex: !!t.ex, at: t.at || 0, catTouched: true };
+    F = { mode: 'tx', id, origYm: hit.ym, kind: t.kind === 'in' ? 'in' : t.kind === 'move' ? 'move' : 'out', from: t.from || '', to: t.to || '', acct: t.acct || '', amount: t.amount, cat: t.cat, memo: t.memo || '', date: t.date, method: t.method || '', sub: t.sub || '', loan: t.loan || '', ex: !!t.ex, at: t.at || 0, catTouched: true };
   } else {
     F = { mode: 'tx', id: null, origYm: null, kind: 'out', amount: 0, cat: lastCat('out'), memo: '', date: isYmd(date) ? date : defaultDate(), method: lastMethod(), sub: '', ex: false, at: 0, catTouched: false };
   }
@@ -1114,22 +1130,24 @@ function txSheet() {
   const f = F, isEdit = !!f.id, t = todayStr();
   return `<form id="txForm" autocomplete="off" novalidate>
     <div class="sheet-h"><h2 id="sheetTitle">${isEdit ? '기록 고치기' : '새 기록'}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
-    <div class="seg" role="group" aria-label="지출·수입" style="width:100%"><button type="button" id="fk2-out" data-act="f-kind" data-kind="out" ${pressed(f.kind === 'out')}>지출</button><button type="button" id="fk2-in" data-act="f-kind" data-kind="in" ${pressed(f.kind === 'in')}>수입</button></div>
+    <div class="seg" role="group" aria-label="지출·수입·이체" style="width:100%"><button type="button" id="fk2-out" data-act="f-kind" data-kind="out" ${pressed(f.kind === 'out')}>지출</button><button type="button" id="fk2-in" data-act="f-kind" data-kind="in" ${pressed(f.kind === 'in')}>수입</button>${acctsArr().length >= 2 || f.kind === 'move' ? `<button type="button" id="fk2-move" data-act="f-kind" data-kind="move" ${pressed(f.kind === 'move')}>이체</button>` : ''}</div>
     ${!f.id && !f.newId && !f.memoId && f.kind === 'out' ? (() => { const ch = oftenChips(); return ch.length ? `<div class="often-chips"><span class="lab">자주 쓰는 내역</span><div class="chips">${ch.map((x, i) => `<button class="chip" type="button" data-act="f-often" data-k="${esc(x.k)}">${esc(catOf(x.cat).emoji)} ${esc(x.name)} <small>${compact(x.last.amount)}</small></button>`).join('')}</div></div>` : ''; })() : ''}
-    ${!f.id && !f.newId && !f.memoId ? (f.smsOpen ? `<div class="field sms-box"><label class="lab" for="f-sms">카드 결제 문자를 붙여 넣으세요</label><textarea class="input" id="f-sms" rows="4" placeholder="[Web발신] ○○카드 승인 12,000원 10/20 12:34 스타벅스"></textarea><p class="amt-hint" id="smsHint">문자 내용은 저장하지 않고 금액·가게·날짜만 읽어요.</p><div class="habit-acts"><button class="btn btn-primary btn-sm" type="button" data-act="sms-apply">읽어서 채우기</button><button class="btn btn-ghost btn-sm" type="button" data-act="sms-close">닫기</button></div></div>` : `<button class="card-link sms-open" type="button" data-act="sms-open">${icon('phone', 'sm')}결제 문자로 채우기</button>`) : ''}
+    ${!f.id && !f.newId && !f.memoId && f.kind !== 'move' ? (f.smsOpen ? `<div class="field sms-box"><label class="lab" for="f-sms">카드 결제 문자를 붙여 넣으세요</label><textarea class="input" id="f-sms" rows="4" placeholder="[Web발신] ○○카드 승인 12,000원 10/20 12:34 스타벅스"></textarea><p class="amt-hint" id="smsHint">문자 내용은 저장하지 않고 금액·가게·날짜만 읽어요.</p><div class="habit-acts"><button class="btn btn-primary btn-sm" type="button" data-act="sms-apply">읽어서 채우기</button><button class="btn btn-ghost btn-sm" type="button" data-act="sms-close">닫기</button></div></div>` : `<button class="card-link sms-open" type="button" data-act="sms-open">${icon('phone', 'sm')}결제 문자로 채우기</button>`) : ''}
     <div class="field">
       <label class="lab" for="f-amount">금액</label>
       <div class="amt"><input id="f-amount" inputmode="numeric" enterkeyhint="done" placeholder="0" value="${f.amount ? fmt(f.amount) : ''}" aria-describedby="amtHint"><span>원</span></div>
       <p class="amt-hint" id="amtHint">${f.amount >= 1e4 ? koreanWon(f.amount) : ''}</p>
       <div class="quick">${[[1000, '+1천'], [5000, '+5천'], [10000, '+1만'], [50000, '+5만'], [100000, '+10만']].map(([v, l]) => `<button class="chip" type="button" data-act="f-plus" data-v="${v}">${l}</button>`).join('')}<button class="chip chip-x" type="button" data-act="f-clear" aria-label="금액 지우기">${icon('x')}</button></div>
     </div>
-    <div class="field"><span class="lab" id="catLab">카테고리</span>
+    ${f.kind === 'move' ? moveFields(f) : ''}
+    <div class="field"${f.kind === 'move' ? ' style="display:none"' : ''}><span class="lab" id="catLab">카테고리</span>
       <div class="cat-grid" role="group" aria-labelledby="catLab">${catsOf(f.kind).map(c => `<button class="cat-opt" type="button" id="fc-${esc(c.id)}" data-act="f-cat" data-id="${esc(c.id)}" ${pressed(f.cat === c.id)}><span class="e" aria-hidden="true">${esc(c.emoji)}</span>${esc(c.name)}</button>`).join('')}</div>
       <p class="learn" id="learnHint" aria-live="polite"></p>
     </div>
-    <div class="field"><label class="lab" for="f-memo">내용</label><input class="input" id="f-memo" list="memoList" maxlength="40" placeholder="${f.kind === 'in' ? '예: 10월 급여' : '예: 점심, 마트 장보기'}" value="${esc(f.memo)}"><datalist id="memoList">${memoSuggestions(f.kind).map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist></div>
+    <div class="field"><label class="lab" for="f-memo">내용</label><input class="input" id="f-memo" list="memoList" maxlength="40" placeholder="${f.kind === 'move' ? '예: 비상금 옮기기, 지역화폐 충전' : f.kind === 'in' ? '예: 10월 급여' : '예: 점심, 마트 장보기'}" value="${esc(f.memo)}"><datalist id="memoList">${memoSuggestions(f.kind).map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist></div>
     <div class="field"><label class="lab" for="f-date">날짜</label><div class="field-row"><input class="input" type="date" id="f-date" value="${f.date}" required><div class="chips"><button class="chip" type="button" id="fd-0" data-act="f-day" data-d="0" ${pressed(f.date === t)}>오늘</button><button class="chip" type="button" id="fd-1" data-act="f-day" data-d="-1" ${pressed(f.date === addDays(t, -1))}>어제</button></div></div></div>
     ${f.kind === 'out' ? `<div class="field"><span class="lab" id="mLab">결제수단</span><div class="chips" role="group" aria-labelledby="mLab">${cfg().methods.map(m => `<button class="chip" type="button" id="fm-${esc(m.id)}" data-act="f-method" data-id="${esc(m.id)}" ${pressed(f.method === m.id)}>${esc(m.name)}</button>`).join('') || '<span class="muted" style="font-size:13px">설정에서 결제수단을 추가할 수 있어요</span>'}</div></div>` : ''}
+    ${acctField(f)}
     ${f.memoId ? `<p class="sheet-note">📝 ‘${esc((S.memos[f.memoId] || {}).name || '')}’ 메모를 기록으로 옮겨요. 실제로 쓴 금액으로 고쳐서 저장하세요.</p>` : ''}
     ${f.newId ? `<p class="sheet-note">${mdLabel(f.planDate)} ${f.loan ? '대출 상환' : '정기 납부'}분으로 기록해요. 실제로 낸 금액이 다르면 고쳐서 저장하세요.</p>` : ''}
     ${f.loan && f.id ? `<p class="sheet-note">‘${esc((S.loans[f.loan] || {}).name || '삭제된 대출')}’ 상환 일정에서 자동으로 기록된 내역이에요. 지워도 다시 생기지 않아요.</p>` : ''}
@@ -1178,11 +1196,13 @@ function saveTx() {
     }
   }
   const id = f.id || f.newId || uid('t');
-  const tx = makeTx({ ...f, at: f.at || Date.now() });
+  if (f.kind === 'move' && (!f.from || !f.to || f.from === f.to)) { toast('보내는 통장과 받는 통장을 서로 다르게 골라 주세요'); return; }
+  const acct = f.kind === 'move' ? '' : f.acct === '-' ? '-' : f.acct || (f.kind === 'out' ? methodAcct(f.method) : mainAcct());
+  const tx = makeTx({ ...f, acct, at: f.at || Date.now() });
   const ym = ymOf(tx.date);
   if (f.id && f.origYm && f.origYm !== ym) writeMonth(f.origYm, { [id]: null });
   writeMonth(ym, { [id]: tx });
-  prefs.lastCat = { ...(prefs.lastCat || {}), [tx.kind]: tx.cat };
+  if (tx.kind !== 'move') prefs.lastCat = { ...(prefs.lastCat || {}), [tx.kind]: tx.cat };
   if (tx.method) prefs.lastMethod = tx.method;
   savePrefs();
   const wasEdit = !!f.id;
@@ -1344,7 +1364,7 @@ function aiContext() {
   const from = [addMonths(curYm, -2), S.ym].sort()[0];
   const recent = months.filter(ym => ym >= from).flatMap(txsOf).sort(byRecent).slice(0, 400);
   L.push('기록 (최신순; id | 날짜 | 구분 | 금액 | 카테고리 | 내용 | 결제수단):');
-  L.push(recent.length ? recent.map(x => `${x.id} | ${x.date} | ${x.kind === 'in' ? '수입' : '지출'} | ${x.amount} | ${x.cat} | ${x.memo || '-'} | ${x.method || '-'}`).join('\n') : '(없음)');
+  L.push(recent.length ? recent.map(x => `${x.id} | ${x.date} | ${x.kind === 'in' ? '수입' : x.kind === 'move' ? '이체' : '지출'} | ${x.amount} | ${x.cat} | ${x.memo || '-'} | ${x.method || '-'}`).join('\n') : '(없음)');
   return L.join('\n');
 }
 const toInt = v => { const n = Math.round(Number(String(v == null ? '' : v).replace(/[^\d.-]/g, ''))); return Number.isFinite(n) ? n : NaN; };
@@ -1744,12 +1764,12 @@ async function loadAccount() {
 }
 function backupData() {
   const settings = clone(cfg());
-  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), goals: clone(S.goals), credit: clone(S.credit), memos: clone(S.memos), nospend: clone(S.nospend), months: clone(S.months) };
+  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), goals: clone(S.goals), credit: clone(S.credit), memos: clone(S.memos), accounts: clone(S.accts), nospend: clone(S.nospend), months: clone(S.months) };
 }
 function csvData() {
   const q = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const rows = [['날짜', '구분', '금액', '카테고리', '내용', '결제수단']];
-  for (const t of [...allTxs()].reverse()) rows.push([t.date, t.kind === 'in' ? '수입' : '지출', t.kind === 'in' ? t.amount : -t.amount, catOf(t.cat).name, t.memo, (methodOf(t.method) || {}).name || '']);
+  for (const t of [...allTxs()].reverse()) rows.push([t.date, t.kind === 'in' ? '수입' : t.kind === 'move' ? '이체' : '지출', t.kind === 'in' ? t.amount : t.kind === 'move' ? t.amount : -t.amount, t.kind === 'move' ? `${(acctOf(t.from) || {}).name || ''} → ${(acctOf(t.to) || {}).name || ''}` : catOf(t.cat).name, t.memo, (methodOf(t.method) || {}).name || '']);
   return '﻿' + rows.map(r => r.map(q).join(',')).join('\r\n');
 }
 async function saveFile(filename, data) {
@@ -1831,6 +1851,8 @@ function applyRestore() {
   if (Object.keys(credP).length) writeCredit(credP);
   const memoP = { ...(b.memos || {}) }; for (const k in S.memos) if (!(k in memoP)) memoP[k] = null;
   if (Object.keys(memoP).length) writeMemos(memoP);
+  const acctP = { ...(b.accounts || {}) }; for (const k in S.accts) if (!(k in acctP)) acctP[k] = null;
+  if (Object.keys(acctP).length) writeAccts(acctP);
   for (const ym in (b.nospend || {})) for (const d in b.nospend[ym]) if (b.nospend[ym][d]) writeNoSpend(d, true);
   if (b.settings) saveSettings(b.settings);
   toast('백업으로 되살렸어요');
@@ -1893,7 +1915,7 @@ function goalStats(g) {
   return { deps, saved, target, plan: Math.round((target * el) / total), end, left, perMonth: t >= end ? left : Math.ceil(left / mLeft / 100) * 100 };
 }
 function vAssetsSwitch(cur) {
-  return `<div class="seg" role="group" aria-label="자산 화면"><button type="button" id="as-goals" data-view="goals" aria-pressed="${cur === 'goals'}">모으기</button><button type="button" id="as-loans" data-view="loans" aria-pressed="${cur === 'loans'}">대출</button><button type="button" id="as-credit" data-view="credit" aria-pressed="${cur === 'credit'}">신용</button></div>`;
+  return `<div class="seg" role="group" aria-label="자산 화면">${[['accounts', '통장'], ['goals', '모으기'], ['loans', '대출'], ['credit', '신용']].map(([v, n]) => `<button type="button" id="as-${v}" data-view="${v}" aria-pressed="${cur === v}">${n}</button>`).join('')}</div>`;
 }
 function goalCard(g) {
   const s = goalStats(g), t = todayStr();
@@ -2512,7 +2534,7 @@ function plannedIn(from, to) {
   }
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.name.localeCompare(b.name)));
 }
-if (window.__MOCK__) window.__plannedIn = plannedIn; // test hook
+if (window.__MOCK__) { window.__plannedIn = plannedIn; window.__acct = id => acctState(acctOf(id)); } // test hook
 const planKind = p => (p.src === 'loan' ? '대출' : p.bill ? '고정 납부' : '구독');
 function planRow(p) {
   const early = p.date > todayStr(), m = methodOf(p.method);
@@ -2919,6 +2941,249 @@ function planMode(ym) {
       ${closedRows}</div>` : '');
 }
 
+/* ================= 통장 (계좌·페이·현금) ================= */
+// 잔액 = 마지막으로 맞춘 잔액(기준) + 그 뒤에 적은 기록. 은행 앱과 가끔 '잔액 맞추기'로 다시 기준을 잡아요.
+const ACCT_TYPES = { bank: { n: '입출금', e: '🏦' }, save: { n: '저축·비상금', e: '🐷' }, pay: { n: '페이·지역화폐', e: '📱' }, cash: { n: '현금', e: '💵' } };
+const ACCT_PRESETS = [
+  { name: '급여통장', type: 'bank' }, { name: '생활비 통장', type: 'bank' }, { name: '비상금 통장', type: 'save' },
+  { name: '적금 통장', type: 'save' }, { name: '지역화폐', type: 'pay' }, { name: '현금 지갑', type: 'cash' },
+];
+const STALE_DAYS = 30;
+function acctsArr() {
+  const a = [];
+  for (const id in S.accts) { const x = S.accts[id]; if (x && x.name != null) a.push({ ...x, id }); }
+  return a.sort((p, q) => (q.main ? 1 : 0) - (p.main ? 1 : 0) || (p.at || 0) - (q.at || 0));
+}
+function writeAccts(patch) {
+  S.accts = { ...S.accts, ...patch };
+  scheduleRender();
+  if (!S.db) return Promise.resolve();
+  const ref = S.db.doc('meta/accounts');
+  return track(enqueue('meta/accounts', async () => {
+    try { await retry(() => ref.update({ items: patch })); }
+    catch (e) {
+      if (e && e.code === 'invalid_argument' && !S.acctsDoc) await retry(() => ref.set({ items: patch }));
+      else throw e;
+    }
+    S.acctsDoc = true;
+  }));
+}
+const acctOf = id => (id && S.accts[id] && S.accts[id].name != null ? { ...S.accts[id], id } : null);
+const acctEmoji = a => (ACCT_TYPES[a.type] || ACCT_TYPES.bank).e;
+const mainAcct = () => { const l = acctsArr(); return (l.find(a => a.main) || l[0] || { id: '' }).id; };
+// a payment method draws from the account that lists it
+const methodAcct = mid => { if (!mid) return ''; const a = acctsArr().find(x => x.methods && x.methods[mid]); return a ? a.id : ''; };
+// credit cards: the money leaves the account later, on the card's billing day
+const isLater = mid => { const m = methodOf(mid); return !!(m && (m.id === 'credit' || /신용/.test(m.name))); };
+const txAcct = t => t.acct && acctOf(t.acct) ? t.acct : t.kind === 'out' ? methodAcct(t.method) : t.kind === 'in' ? mainAcct() : '';
+const afterBase = (t, a) => t.date > (a.baseDate || '') || (t.date === a.baseDate && (t.at || 0) >= (a.baseAt || 0));
+function acctState(a) {
+  const t = todayStr(), cur = ymOf(t), monthEnd = `${cur}-${pad(daysIn(cur))}`;
+  let bal = Math.round(+a.base || 0), card = 0, n = 0;
+  for (const x of allTxs()) {
+    if (!afterBase(x, a)) continue;
+    if (x.kind === 'move') {
+      if (x.from === a.id) { bal -= x.amount; n++; }
+      if (x.to === a.id) { bal += x.amount; n++; }
+      continue;
+    }
+    if (txAcct(x) !== a.id) continue;
+    n++;
+    if (x.kind === 'in') bal += x.amount;
+    else if (isLater(x.method)) card += x.amount;
+    else bal -= x.amount;
+  }
+  const ups = plannedIn(addDays(t, 1), monthEnd).filter(p => methodAcct(p.method) === a.id);
+  const upNow = sum(ups.filter(p => !isLater(p.method)).map(p => p.amount));
+  const days = a.baseDate ? diffDays(a.baseDate, t) : 0;
+  return { bal, card, ups, upNow, proj: bal - card - upNow, n, days, stale: days > STALE_DAYS };
+}
+function acctMonthFlow(aid, ym) {
+  let i = 0, o = 0;
+  for (const x of txsOf(ym)) {
+    if (x.kind === 'move') { if (x.to === aid) i += x.amount; if (x.from === aid) o += x.amount; continue; }
+    if (txAcct(x) !== aid) continue;
+    if (x.kind === 'in') i += x.amount; else o += x.amount;
+  }
+  return { in: i, out: o };
+}
+const unlinkedMethods = () => cfg().methods.filter(m => !methodAcct(m.id));
+
+/* --- view --- */
+function acctCard(a) {
+  const st = acctState(a), fl = acctMonthFlow(a.id, S.ym), ty = ACCT_TYPES[a.type] || ACCT_TYPES.bank;
+  const ms = cfg().methods.filter(m => a.methods && a.methods[m.id]);
+  return `<section class="card acct-card">
+    <div class="loan-top"><span class="emo" aria-hidden="true">${acctEmoji(a)}</span><div style="min-width:0"><p class="loan-name">${esc(a.name)}${a.main ? '<span class="tag sub">주 통장</span>' : ''}${a.ex ? '<span class="tag">예시</span>' : ''}</p><p class="loan-meta">${esc([ty.n, a.bank].filter(Boolean).join(' · '))}</p></div><button class="btn btn-ghost btn-sm" type="button" data-act="acct-edit" data-id="${esc(a.id)}">고치기</button></div>
+    <p class="acct-bal">${st.bal < 0 ? '−' : ''}${fmt(Math.abs(st.bal))}<span class="u">원</span></p>
+    <p class="acct-base${st.stale ? ' stale' : ''}">${a.baseDate ? `${mdLabel(a.baseDate)} 잔액 ${won(a.base || 0)}에서 기록 ${st.n}건 반영` : '아직 잔액을 맞추지 않았어요'}${st.stale ? ` · 잔액을 맞춘 지 ${st.days}일 지났어요` : ''}</p>
+    ${st.card || st.upNow ? `<div class="acct-proj">${st.card ? `<div><span>신용카드로 쓴 돈 <small>결제일에 빠져요</small></span><b>−${won(st.card)}</b></div>` : ''}${st.upNow ? `<div><span>이번 달 남은 자동이체 <small>${st.ups.filter(p => !isLater(p.method)).length}건</small></span><b>−${won(st.upNow)}</b></div>` : ''}<div class="tot"><span>다 빠져나간 뒤 예상</span><b>${st.proj < 0 ? '−' : ''}${won(Math.abs(st.proj))}</b></div></div>` : ''}
+    <div class="acct-flow"><div><span class="stat-l">${mLabel(S.ym)} 들어온 돈</span><span class="stat-v in-c">+${won(fl.in)}</span></div><div><span class="stat-l">${mLabel(S.ym)} 나간 돈</span><span class="stat-v">−${won(fl.out)}</span></div></div>
+    <p class="acct-methods">${ms.length ? `이 통장에서 나가는 결제수단 ${ms.map(m => `<span class="tag plan">${esc(m.name)}${isLater(m.id) ? ' (결제 통장)' : ''}</span>`).join('')}` : '<span class="muted">연결된 결제수단이 없어요. ‘고치기’에서 연결하면 지출이 이 통장에서 빠져요.</span>'}</p>
+    <div class="acct-acts"><button class="btn btn-${st.stale ? 'primary' : 'soft'} btn-sm" type="button" data-act="acct-fix" data-id="${esc(a.id)}" ${S.mode === 'denied' ? 'disabled' : ''}>잔액 맞추기</button><button class="btn btn-soft btn-sm" type="button" data-act="acct-move" data-id="${esc(a.id)}" ${S.mode === 'denied' ? 'disabled' : ''}>이체</button><button class="btn btn-ghost btn-sm" type="button" data-act="acct-list" data-id="${esc(a.id)}">내역 보기</button></div>
+  </section>`;
+}
+function vAccounts() {
+  const head = `<div class="view-h"><h1 class="view-title">통장</h1><div class="view-acts">${vAssetsSwitch('accounts')}<button class="btn btn-primary btn-sm" type="button" data-act="acct-add" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus')}통장 추가</button></div></div>`;
+  if (isLoading()) return head + `<section class="card">${emptyBox('불러오는 중이에요', '')}</section>`;
+  const list = acctsArr();
+  if (!list.length) return head + `<section class="card">${emptyBox('등록된 통장이 없어요', '쓰고 있는 통장과 지금 잔액을 넣으면 지출·수입을 적을 때마다 잔액이 따라 움직여요. 체크카드·계좌이체를 통장에 연결하면 어느 통장에서 나갔는지도 모여요.', `<div class="chips" style="justify-content:center">${ACCT_PRESETS.map((p, i) => `<button class="chip" type="button" data-act="acct-add" data-i="${i}">${ACCT_TYPES[p.type].e} ${p.name}</button>`).join('')}</div>`)}</section>`;
+  const sts = list.map(a => ({ a, s: acctState(a) }));
+  const total = sum(sts.map(x => x.s.bal)), card = sum(sts.map(x => x.s.card)), up = sum(sts.map(x => x.s.upNow));
+  const free = sum(sts.filter(x => x.a.type !== 'save').map(x => x.s.bal));
+  const un = unlinkedMethods();
+  const stale = sts.filter(x => x.s.stale);
+  const summary = `<section class="card loan-sum">
+    <span class="hero-label">통장 잔액 합계</span>
+    <p class="hero-num">${total < 0 ? '−' : ''}${fmt(Math.abs(total))}<span class="u">원</span></p>
+    <span class="muted" style="font-size:13.5px">${list.length}개 · 바로 쓸 수 있는 돈 ${won(free)} (저축·비상금 통장 제외)</span>
+    <div class="stat-grid">
+      <div><span class="stat-l">신용카드로 쓴 돈</span><span class="stat-v">${card ? '−' + won(card) : '0원'}</span></div>
+      <div><span class="stat-l">이번 달 남은 자동이체</span><span class="stat-v">${up ? '−' + won(up) : '0원'}</span></div>
+      <div><span class="stat-l">다 빠져나간 뒤 예상</span><span class="stat-v">${won(total - card - up)}</span></div>
+    </div>
+  </section>`;
+  const warns = [];
+  if (un.length) warns.push(`<div class="notice warn"><p><b>${un.map(m => esc(m.name)).join(', ')}</b>${josa(un[un.length - 1].name, '은/는').slice(-1)} 어느 통장에도 연결되지 않아서 그 지출은 잔액에 반영되지 않아요. 통장의 ‘고치기’에서 연결해 주세요.</p></div>`);
+  if (stale.length) warns.push(`<div class="notice"><p>${stale.map(x => esc(x.a.name)).join(', ')}의 잔액을 맞춘 지 한 달이 넘었어요. 기록하지 않은 지출이 쌓였을 수 있으니 은행 앱 잔액과 맞춰 주세요.</p></div>`);
+  return head + summary + warns.join('') + `<div class="acct-grid">${sts.map(x => acctCard(x.a)).join('')}</div>
+    <p class="set-note muted" style="font-size:12.5px">계좌번호는 적지 않아요. 이름과 잔액만으로 관리해요. 통장끼리 옮긴 돈이나 지역화폐 충전은 기록 화면의 ‘이체’로 적으면 지출로 잡히지 않아요.</p>`;
+}
+function homeAcctCard() {
+  const list = acctsArr();
+  if (!list.length || isLoading()) return '';
+  const sts = list.map(a => ({ a, s: acctState(a) }));
+  return `<section class="card" data-o="2">
+    <div class="card-h"><h2 class="card-t">내 통장</h2><button class="card-link" type="button" data-view="accounts">전체${icon('right')}</button></div>
+    <div class="rank">${sts.slice(0, 4).map(({ a, s }) => `<button class="sub-row" type="button" data-view="accounts"><span class="emo" aria-hidden="true">${acctEmoji(a)}</span><span class="tx-main"><span class="sub-name">${esc(a.name)}${a.main ? '<span class="tag sub">주</span>' : ''}</span><span class="sub-meta">${s.stale ? '잔액 맞출 때가 됐어요' : s.card || s.upNow ? `빠져나갈 돈 ${won(s.card + s.upNow)}` : ACCT_TYPES[a.type] ? ACCT_TYPES[a.type].n : ''}</span></span><span class="sub-end"><span class="sub-amt">${s.bal < 0 ? '−' : ''}${won(Math.abs(s.bal))}</span></span></button>`).join('')}</div>
+    <p class="bud-foot">합계 <b>${won(sum(sts.map(x => x.s.bal)))}</b></p>
+  </section>`;
+}
+
+/* --- account sheet --- */
+function openAcctSheet(id, preset) {
+  if (S.mode === 'denied') return;
+  const a = id && acctOf(id), t = todayStr();
+  if (id && !a) return;
+  const p = ACCT_PRESETS[preset] || null;
+  F = a
+    ? { mode: 'acct', id, name: a.name, type: a.type || 'bank', bank: a.bank || '', balance: acctState(a).bal, origBal: acctState(a).bal, main: !!a.main, methods: { ...(a.methods || {}) }, ex: !!a.ex, at: a.at || 0 }
+    : { mode: 'acct', id: null, name: p ? p.name : '', type: p ? p.type : 'bank', bank: '', balance: 0, origBal: null, main: !acctsArr().length, methods: {}, ex: false, at: 0 };
+  if (!a && !acctsArr().length && (!p || p.type === 'bank')) for (const m of cfg().methods) if (!/현금/.test(m.name)) F.methods[m.id] = true; // first account: card·transfer usually come out of it
+  if (!a && p && p.type === 'cash') for (const m of cfg().methods) if (/현금/.test(m.name) && !methodAcct(m.id)) F.methods[m.id] = true;
+  showSheet(acctSheet(), a ? null : '#a-name');
+}
+const canSaveAcct = () => !!(F && F.name.trim());
+function acctSheet() {
+  const f = F, isEdit = !!f.id;
+  const ms = cfg().methods;
+  return `<form id="acctForm" autocomplete="off" novalidate>
+    <div class="sheet-h"><h2 id="sheetTitle">${isEdit ? '통장 고치기' : '통장 추가'}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    ${isEdit ? '' : `<div class="chips preset" role="group" aria-label="자주 쓰는 통장">${ACCT_PRESETS.map((p, i) => `<button class="chip" type="button" data-act="a-preset" data-i="${i}">${ACCT_TYPES[p.type].e} ${p.name}</button>`).join('')}</div>`}
+    <div class="field-row"><div class="field"><label class="lab" for="a-name">이름</label><input class="input" id="a-name" maxlength="20" placeholder="예: 급여통장" value="${esc(f.name)}"></div><div class="field"><label class="lab" for="a-bank">은행·서비스 <span class="muted" style="font-weight:400">(선택)</span></label><input class="input" id="a-bank" maxlength="20" placeholder="예: ○○은행, 탐나는전" value="${esc(f.bank)}"></div></div>
+    <div class="field"><span class="lab" id="atLab">종류</span><div class="seg" role="group" aria-labelledby="atLab" style="width:100%">${Object.entries(ACCT_TYPES).map(([k, v]) => `<button type="button" id="at-${k}" data-act="a-type" data-v="${k}" ${pressed(f.type === k)}>${v.n}</button>`).join('')}</div></div>
+    <div class="field"><label class="lab" for="a-bal">${isEdit ? '지금 잔액' : '지금 잔액 (은행 앱에서 확인)'}</label><div class="amt"><input id="a-bal" inputmode="numeric" placeholder="0" value="${f.balance ? fmt(Math.abs(f.balance)) : ''}"><span>원</span></div><p class="amt-hint" id="aHint">${isEdit ? '바꾸면 오늘 기준으로 잔액을 다시 맞춰요.' : '오늘 이후에 적는 기록부터 이 잔액에 더하고 빼요.'}</p></div>
+    <div class="field"><span class="lab" id="amLab">이 통장에서 나가는 결제수단</span><div class="chips" role="group" aria-labelledby="amLab">${ms.map(m => { const other = methodAcct(m.id); const o = other && other !== f.id ? acctOf(other) : null; return `<button class="chip" type="button" id="am-${esc(m.id)}" data-act="a-method" data-id="${esc(m.id)}" ${pressed(!!f.methods[m.id])}>${esc(m.name)}${isLater(m.id) ? ' · 결제 통장' : ''}${o ? ` <small>(지금 ${esc(o.name)})</small>` : ''}</button>`; }).join('')}</div>
+      <p class="amt-hint">체크카드·계좌이체는 쓰자마자 빠지고, 신용카드는 결제일에 이 통장에서 빠져요. 결제수단 하나는 통장 하나에만 연결돼요.</p></div>
+    <div class="switch-row"><div><span class="card-t">주 통장</span><p>통장을 고르지 않은 수입은 이 통장으로 들어온 것으로 봐요.</p></div><button class="switch" type="button" role="switch" id="a-main" aria-checked="${f.main}" data-act="a-main" aria-label="주 통장"></button></div>
+    <p class="set-note" style="font-size:12.5px">계좌번호·비밀번호는 적지 마세요. 이름과 잔액만 있으면 돼요.</p>
+    <div class="sheet-actions">${isEdit ? `<button class="btn btn-danger" type="button" data-act="a-delete">${icon('trash')}삭제</button>` : ''}<button class="btn btn-primary btn-block" type="submit" id="a-save" ${canSaveAcct() ? '' : 'disabled'}>${isEdit ? '고친 내용 저장' : '추가하기'}</button></div>
+  </form>`;
+}
+function saveAcct() {
+  const f = F;
+  if (!canSaveAcct()) return;
+  const id = f.id || uid('a'), prev = f.id ? S.accts[f.id] : null, now = Date.now(), t = todayStr();
+  const rebase = !prev || f.balance !== f.origBal;
+  const acct = {
+    name: f.name.trim().slice(0, 20), type: f.type, bank: f.bank.trim().slice(0, 20), main: !!f.main, methods: { ...f.methods }, ex: !!f.ex, at: f.at || now,
+    base: rebase ? Math.round(f.balance) : prev.base || 0, baseDate: rebase ? t : prev.baseDate || t, baseAt: rebase ? now : prev.baseAt || 0,
+  };
+  for (const m of cfg().methods) if (!(m.id in acct.methods)) acct.methods[m.id] = false;
+  const patch = { [id]: acct };
+  for (const o of acctsArr()) { // one account per payment method, one main account
+    if (o.id === id) continue;
+    const mm = {}; let ch = false;
+    for (const mid in f.methods) if (f.methods[mid] && o.methods && o.methods[mid]) { mm[mid] = false; ch = true; }
+    if (ch || (acct.main && o.main)) patch[o.id] = { ...S.accts[o.id], methods: { ...(o.methods || {}), ...mm }, main: acct.main ? false : !!o.main };
+  }
+  writeAccts(patch);
+  closeSheet();
+  toast(f.id ? (rebase ? `잔액을 ${won(acct.base)}으로 맞췄어요` : '고쳤어요') : `‘${acct.name}’ 통장을 추가했어요`);
+}
+function deleteAcct() {
+  const f = F, prev = S.accts[f.id];
+  closeSheet();
+  if (!prev) return;
+  writeAccts({ [f.id]: null });
+  toast('통장을 지웠어요. 지난 기록은 내역에 남아요', { undo: () => writeAccts({ [f.id]: prev }) });
+}
+
+/* --- 잔액 맞추기 --- */
+function openFixSheet(id) {
+  const a = acctOf(id);
+  if (!a || S.mode === 'denied') return;
+  const st = acctState(a);
+  F = { mode: 'fix', id, calc: st.bal, actual: null };
+  showSheet(fixSheet(), '#x-bal');
+}
+function fixSheet() {
+  const f = F, a = acctOf(f.id), d = f.actual == null ? null : f.actual - f.calc;
+  return `<form id="fixForm" autocomplete="off" novalidate>
+    <div class="sheet-h"><h2 id="sheetTitle">${esc(a.name)} 잔액 맞추기</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    <div class="day-sum" style="grid-template-columns:1fr 1fr"><div><span class="stat-l">가계부 잔액</span><span class="stat-v">${won(f.calc)}</span></div><div><span class="stat-l">마지막으로 맞춘 날</span><span class="stat-v">${a.baseDate ? mdLabel(a.baseDate) : '-'}</span></div></div>
+    <div class="field"><label class="lab" for="x-bal">은행 앱에 보이는 지금 잔액</label><div class="amt"><input id="x-bal" inputmode="numeric" placeholder="0" value="${f.actual != null ? fmt(f.actual) : ''}"><span>원</span></div><p class="amt-hint" id="xHint">${d == null ? '신용카드 결제일이 지났다면 카드값이 빠진 잔액을 넣으세요.' : fixHint(d)}</p></div>
+    <div class="fix-acts" id="fixActs">${fixActs(d)}</div>
+  </form>`;
+}
+const fixHint = d => d === 0 ? '가계부와 똑같아요. 잘 기록하고 있어요!' : d < 0 ? `가계부보다 ${won(-d)} 적어요. 적지 않은 지출이나 빠져나간 카드값이 있을 수 있어요.` : `가계부보다 ${won(d)} 많아요. 적지 않은 수입이나 이자가 있을 수 있어요.`;
+const fixActs = d => d == null ? '' : d === 0
+  ? '<button class="btn btn-primary btn-block" type="button" data-act="fix-save" data-rec="0">확인했어요</button>'
+  : `<button class="btn btn-primary btn-block" type="button" data-act="fix-save" data-rec="0">잔액만 맞추기</button><button class="btn btn-soft btn-block" type="button" data-act="fix-save" data-rec="1">차이 ${won(Math.abs(d))}을 ${d < 0 ? '‘기타 지출’' : '‘기타 수입’'}로 남기고 맞추기</button>`;
+function refreshFix() {
+  const d = F.actual == null ? null : F.actual - F.calc;
+  const h = $('#xHint'); if (h) h.textContent = d == null ? '신용카드 결제일이 지났다면 카드값이 빠진 잔액을 넣으세요.' : fixHint(d);
+  const box = $('#fixActs'); if (box) box.innerHTML = fixActs(d);
+}
+function saveFix(record) {
+  const f = F, a = S.accts[f.id];
+  if (!a || f.actual == null) return;
+  const t = todayStr(), now = Date.now(), d = f.actual - f.calc;
+  if (record && d) {
+    const kind = d < 0 ? 'out' : 'in';
+    const cat = kind === 'out' ? (catsOf('out').find(c => c.id === 'etc') || catsOf('out')[0] || UNKNOWN_CAT).id : (catsOf('in').find(c => c.id === 'etc_in') || catsOf('in')[0] || UNKNOWN_CAT).id;
+    writeMonth(ymOf(t), { [uid('t')]: makeTx({ date: t, kind, amount: Math.abs(d), cat, memo: `잔액 맞춤 (${a.name})`, acct: f.id, at: now - 1 }) });
+  }
+  writeAccts({ [f.id]: { ...a, base: f.actual, baseDate: t, baseAt: now } });
+  const prev = a;
+  closeSheet();
+  toast(`${a.name} 잔액을 ${won(f.actual)}으로 맞췄어요`, { undo: () => writeAccts({ [f.id]: prev }) });
+}
+
+/* --- 이체 (통장 → 통장) --- */
+function openMoveSheet(from) {
+  openTxSheet({});
+  if (!F || F.mode !== 'tx') return;
+  F.kind = 'move'; F.from = from || mainAcct(); F.to = (acctsArr().find(a => a.id !== F.from) || { id: '' }).id;
+  rerenderSheet(txSheet());
+  const el = $('#f-amount'); if (el) el.focus();
+}
+const acctChips = (act, cur, label, none) => `<div class="chips" role="group" aria-label="${label}">${acctsArr().map(a => `<button class="chip" type="button" id="${act}-${esc(a.id)}" data-act="${act}" data-id="${esc(a.id)}" ${pressed(cur === a.id)}>${acctEmoji(a)} ${esc(a.name)}</button>`).join('')}${none ? `<button class="chip" type="button" id="${act}-none" data-act="${act}" data-id="" ${pressed(!cur)}>${none}</button>` : ''}</div>`;
+
+function acctField(f) {
+  if (f.kind === 'move' || !acctsArr().length) return '';
+  const auto = f.kind === 'out' ? methodAcct(f.method) : mainAcct();
+  const cur = f.acct === '-' ? '' : f.acct || auto;
+  const lab = f.kind === 'out' ? (isLater(f.method) ? '결제 통장 <span class="muted" style="font-weight:400">(신용카드는 결제일에 빠져요)</span>' : '어느 통장에서 나갔나요?') : '어느 통장으로 들어왔나요?';
+  return `<div class="field" id="acctField"><span class="lab">${lab}</span>${acctChips('f-acct', cur, f.kind === 'out' ? '출금 통장' : '입금 통장', '통장 없음')}</div>`;
+}
+function refreshAcctField() { const el = $('#acctField'); if (el) el.outerHTML = acctField(F); }
+function moveFields(f) {
+  return `<div class="field"><span class="lab">보내는 통장</span>${acctChips('f-from', f.from, '보내는 통장')}</div>
+    <div class="field"><span class="lab">받는 통장</span>${acctChips('f-to', f.to, '받는 통장')}</div>
+    <p class="amt-hint">통장끼리 옮긴 돈이에요. 지출·수입 통계에는 넣지 않고 두 통장 잔액만 바꿔요. 지역화폐 충전도 여기에 적어요.</p>`;
+}
+
 /* ================= toast ================= */
 let toastTimer = 0, toastUndo = null;
 function toast(msg, opts = {}) {
@@ -2953,6 +3218,8 @@ function onMoneyInput(el) {
   else if (el.id === 'dep-amount') { F.amount = v; $('#dep-save').disabled = !(v > 0); }
   else if (el.id === 'su-income' || el.id === 'su-fixed') { F[el.id === 'su-income' ? 'income' : 'fixed'] = v; const pl = document.createElement('div'); pl.innerHTML = setupSheet(); const np = pl.querySelector('#suPlan'); if (np) $('#suPlan').innerHTML = np.innerHTML; $('#su-save').disabled = !(F.income > 0 && F.income > F.fixed); }
   else if (el.id === 'm-amount') { F.amount = v; refreshMemoHints(); }
+  else if (el.id === 'a-bal') { F.balance = v; }
+  else if (el.id === 'x-bal') { F.actual = digits ? v : null; refreshFix(); }
   else if (el.id === 'q-principal') { F.principal = v; $('#qpHint').textContent = v >= 1e4 ? koreanWon(v) : '처음 빌린 금액이 아니라 오늘 기준으로 남은 금액이에요.'; refreshQuick(); }
   else if (el.id === 'q-pay') { F.pay = v; refreshQuick(); }
   else if (el.id === 'q-int') { F.int = v; refreshQuick(); }
@@ -3084,7 +3351,8 @@ const ACT = {
   // transaction sheet
   'f-kind': el => {
     if (F.kind === el.dataset.kind) return;
-    F.kind = el.dataset.kind;
+    F.kind = el.dataset.kind; F.acct = '';
+    if (F.kind === 'move') { F.from = F.from || mainAcct(); F.to = F.to && F.to !== F.from ? F.to : (acctsArr().find(a => a.id !== F.from) || { id: '' }).id; rerenderSheet(txSheet()); return; }
     if (catOf(F.cat).kind !== F.kind || !catOf(F.cat).id) { F.cat = lastCat(F.kind); F.catTouched = false; }
     rerenderSheet(txSheet());
   },
@@ -3092,7 +3360,21 @@ const ACT = {
   'f-clear': () => { F.amount = 0; syncTxSheet(); $('#f-amount').focus(); },
   'f-cat': el => { F.cat = el.dataset.id; F.catTouched = true; $('#learnHint').textContent = ''; syncTxSheet(); },
   'f-day': el => { F.date = addDays(todayStr(), +el.dataset.d); $('#f-date').value = F.date; syncTxSheet(); },
-  'f-method': el => { F.method = el.dataset.id; syncTxSheet(); },
+  'f-method': el => { F.method = el.dataset.id; syncTxSheet(); refreshAcctField(); },
+  'f-acct': el => { F.acct = el.dataset.id || '-'; refreshAcctField(); },
+  'f-from': el => { F.from = el.dataset.id; if (F.to === F.from) F.to = (acctsArr().find(a => a.id !== F.from) || { id: '' }).id; rerenderSheet(txSheet()); },
+  'f-to': el => { F.to = el.dataset.id; if (F.from === F.to) F.from = (acctsArr().find(a => a.id !== F.to) || { id: '' }).id; rerenderSheet(txSheet()); },
+  'acct-add': el => openAcctSheet(null, el.dataset.i != null ? +el.dataset.i : null),
+  'acct-edit': el => openAcctSheet(el.dataset.id),
+  'acct-fix': el => openFixSheet(el.dataset.id),
+  'acct-move': el => openMoveSheet(el.dataset.id),
+  'acct-list': el => { S.filter = { kind: 'all', cat: '', method: '', q: '', acct: el.dataset.id }; S.listMode = 'list'; go('list'); },
+  'a-preset': el => { const p = ACCT_PRESETS[+el.dataset.i]; if (!p) return; F.name = p.name; F.type = p.type; rerenderSheet(acctSheet()); const b = $('#a-bal'); if (b) b.focus(); },
+  'a-type': el => { F.type = el.dataset.v; rerenderSheet(acctSheet()); },
+  'a-method': el => { const id = el.dataset.id; F.methods[id] = !F.methods[id]; el.setAttribute('aria-pressed', String(!!F.methods[id])); },
+  'a-main': el => { F.main = !F.main; el.setAttribute('aria-checked', String(F.main)); },
+  'a-delete': () => deleteAcct(),
+  'fix-save': el => saveFix(el.dataset.rec === '1'),
   'f-delete': () => deleteTx(),
   // subscription sheet
   's-cycle': el => { F.cycle = el.dataset.v; rerenderSheet(subSheet()); },
@@ -3112,7 +3394,7 @@ document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'flt-q') { S.filter.q = el.value; updateListResults(); return; }
   if (el.id === 'ai-q') { S.aiDraft = el.value; return; }
-  if (el.id === 'f-amount' || el.id === 'm-amount' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || el.id === 'q-principal' || el.id === 'q-pay' || el.id === 'q-int' || el.id === 'g-target' || el.id === 'g-monthly' || el.id === 'dep-amount' || el.id === 'su-income' || el.id === 'su-fixed' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
+  if (el.id === 'f-amount' || el.id === 'm-amount' || el.id === 'a-bal' || el.id === 'x-bal' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || el.id === 'q-principal' || el.id === 'q-pay' || el.id === 'q-int' || el.id === 'g-target' || el.id === 'g-monthly' || el.id === 'dep-amount' || el.id === 'su-income' || el.id === 'su-fixed' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
   if (F && F.mode === 'goal') {
     if (el.id === 'g-name') F.name = el.value;
     else if (el.id === 'g-emoji') F.emoji = el.value;
@@ -3133,6 +3415,7 @@ document.addEventListener('input', e => {
     return;
   }
   if (!F) return;
+  if (F.mode === 'acct') { if (el.id === 'a-name') { F.name = el.value; const b = $('#a-save'); if (b) b.disabled = !canSaveAcct(); } else if (el.id === 'a-bank') F.bank = el.value; return; }
   if (F.mode === 'memo') { if (el.id === 'm-name') { F.name = el.value; refreshMemoHints(); } else if (el.id === 'm-note') F.note = el.value; return; }
   if (el.id === 'f-memo') { F.memo = el.value; if (!F.catTouched) $('#learnHint').textContent = ''; }
   else if (el.id === 's-name') { F.name = el.value; $('#s-save').disabled = !canSaveSub(); }
@@ -3142,6 +3425,7 @@ document.addEventListener('change', e => {
   const el = e.target;
   if (el.id === 'flt-cat') { S.filter.cat = el.value; renderView(); return; }
   if (el.id === 'flt-method') { S.filter.method = el.value; renderView(); return; }
+  if (el.id === 'flt-acct') { S.filter.acct = el.value; renderView(); return; }
   if (el.dataset && el.dataset.field && el.dataset.cat) { updateCat(el.dataset.cat, el.dataset.field, el.value); return; }
   if (el.dataset && el.dataset.method && el.id.startsWith('mn-')) { updateMethod(el.dataset.method, el.value); return; }
   if (el.id === 'restoreFile') { readRestore(el.files && el.files[0]); return; }
@@ -3184,6 +3468,8 @@ document.addEventListener('submit', e => {
   else if (F.mode === 'setup') saveSetup();
   else if (F.mode === 'dep') saveDep();
   else if (F.mode === 'memo') saveMemo();
+  else if (F.mode === 'acct') saveAcct();
+  else if (F.mode === 'fix') { if (F.actual != null) saveFix(false); }
   else if (F.mode === 'ai') { const q = $('#ai-q'); if (q) askAi(q.value); }
 });
 document.addEventListener('keydown', e => {

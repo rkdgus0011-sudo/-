@@ -785,6 +785,26 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-varian
 .dup-hint { font-size: 13px; color: var(--warn-ink); line-height: 1.5; }
 .dup-hint:empty { display: none; }
 
+/* 통장 */
+.acct-grid { display: grid; gap: 16px; }
+@media (min-width: 960px) { .acct-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+.acct-bal { font-size: 30px; font-weight: 700; letter-spacing: -.02em; margin-top: 12px; line-height: 1.2; }
+.acct-bal .u { font-size: 16px; font-weight: 500; margin-left: 2px; color: var(--ink-2); }
+.acct-base { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+.acct-base.stale { color: var(--warn-ink); }
+.acct-proj { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); display: grid; gap: 4px; font-size: 13.5px; }
+.acct-proj > div { display: flex; justify-content: space-between; gap: 8px; }
+.acct-proj small { color: var(--muted); font-size: 12px; margin-left: 4px; }
+.acct-proj b { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.acct-proj .tot { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 2px; font-weight: 600; }
+.acct-flow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.acct-methods { font-size: 13px; color: var(--ink-2); margin-top: 12px; line-height: 1.9; }
+.acct-methods .tag { margin-left: 6px; }
+.acct-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.tx-amt.move { color: var(--ink-2); font-weight: 500; }
+.chip small { color: var(--muted); font-size: 11.5px; }
+.fix-acts { display: grid; gap: 8px; }
+
 /* ---------- web version: page base + sign-in screen ---------- */
 :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 body { margin: 0; }
