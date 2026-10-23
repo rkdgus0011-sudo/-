@@ -187,6 +187,9 @@ function findTx(id) {
   for (const ym in S.months) { const t = S.months[ym][id]; if (t) return { ym, t }; }
   return null;
 }
+const NOTE_MAX = 500;
+const NOTE_TAGS = ['👥 누구와', '📍 어디서', '🛒 산 것', '💡 왜 샀나', '🔁 다음엔'];
+const noteLine = n => String(n || '').split('\n').map(x => x.trim()).filter(Boolean).join(' · ');
 function makeTx(t) {
   const kind = t.kind === 'in' ? 'in' : t.kind === 'move' ? 'move' : 'out';
   const o = {
@@ -195,6 +198,8 @@ function makeTx(t) {
     sub: t.sub || '', loan: t.loan || '', ex: !!t.ex, at: t.at || Date.now(),
   };
   if (kind === 'move') { o.from = t.from || ''; o.to = t.to || ''; } else if (t.acct) o.acct = t.acct;
+  const note = String(t.note || '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, NOTE_MAX);
+  if (note || typeof t.note === 'string') o.note = note; // '' clears an old note (writes are merged)
   return o;
 }
 
@@ -532,7 +537,7 @@ function txRow(t) {
   const sub = [c.name]; if (m) sub.push(m.name);
   return `<button class="tx" type="button" data-act="edit-tx" data-id="${esc(t.id)}">
     <span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span>
-    <span class="tx-main"><span class="tx-title">${esc(t.memo || c.name)}${t.sub ? '<span class="tag sub">정기</span>' : ''}${t.loan ? '<span class="tag sub">대출</span>' : ''}${t.ex ? '<span class="tag">예시</span>' : ''}</span><span class="tx-sub">${esc(sub.join(' · '))}</span></span>
+    <span class="tx-main"><span class="tx-title">${esc(t.memo || c.name)}${t.sub ? '<span class="tag sub">정기</span>' : ''}${t.loan ? '<span class="tag sub">대출</span>' : ''}${t.ex ? '<span class="tag">예시</span>' : ''}</span><span class="tx-sub">${esc(sub.join(' · '))}</span>${t.note ? `<span class="tx-note" title="${esc(t.note)}">📝 ${esc(noteLine(t.note))}</span>` : ''}</span>
     <span class="tx-amt${t.kind === 'in' ? ' in' : ''}">${signed(t.amount, t.kind)}</span>
   </button>`;
 }
@@ -827,7 +832,7 @@ function applyFilter(list) {
     && (!f.cat || t.cat === f.cat)
     && (!f.method || t.method === f.method)
     && (!f.acct || (t.kind === 'move' ? t.from === f.acct || t.to === f.acct : txAcct(t) === f.acct))
-    && (!q || (t.memo || '').toLowerCase().includes(q) || catOf(t.cat).name.toLowerCase().includes(q)));
+    && (!q || (t.memo || '').toLowerCase().includes(q) || (t.note || '').toLowerCase().includes(q) || catOf(t.cat).name.toLowerCase().includes(q)));
 }
 function sumBar(list) {
   const tt = totals(list), net = tt.in - tt.out;
@@ -1130,9 +1135,9 @@ function openTxSheet({ id, date } = {}) {
   if (id && !hit) return;
   if (hit) {
     const t = hit.t;
-    F = { mode: 'tx', id, origYm: hit.ym, kind: t.kind === 'in' ? 'in' : t.kind === 'move' ? 'move' : 'out', from: t.from || '', to: t.to || '', acct: t.acct || '', amount: t.amount, cat: t.cat, memo: t.memo || '', date: t.date, method: t.method || '', sub: t.sub || '', loan: t.loan || '', ex: !!t.ex, at: t.at || 0, catTouched: true };
+    F = { mode: 'tx', id, note: t.note || '', origYm: hit.ym, kind: t.kind === 'in' ? 'in' : t.kind === 'move' ? 'move' : 'out', from: t.from || '', to: t.to || '', acct: t.acct || '', amount: t.amount, cat: t.cat, memo: t.memo || '', date: t.date, method: t.method || '', sub: t.sub || '', loan: t.loan || '', ex: !!t.ex, at: t.at || 0, catTouched: true };
   } else {
-    F = { mode: 'tx', id: null, origYm: null, kind: 'out', amount: 0, cat: lastCat('out'), memo: '', date: isYmd(date) ? date : defaultDate(), method: lastMethod(), sub: '', ex: false, at: 0, catTouched: false };
+    F = { mode: 'tx', id: null, note: '', origYm: null, kind: 'out', amount: 0, cat: lastCat('out'), memo: '', date: isYmd(date) ? date : defaultDate(), method: lastMethod(), sub: '', ex: false, at: 0, catTouched: false };
   }
   showSheet(txSheet(), hit ? null : '#f-amount');
 }
@@ -1156,6 +1161,7 @@ function txSheet() {
       <p class="learn" id="learnHint" aria-live="polite"></p>
     </div>
     <div class="field"><label class="lab" for="f-memo">내용</label><input class="input" id="f-memo" list="memoList" maxlength="40" placeholder="${f.kind === 'move' ? '예: 비상금 옮기기, 지역화폐 충전' : f.kind === 'in' ? '예: 10월 급여' : '예: 점심, 마트 장보기'}" value="${esc(f.memo)}"><datalist id="memoList">${memoSuggestions(f.kind).map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist></div>
+    ${f.noteOpen || f.note ? `<div class="field note-field"><div class="note-head"><label class="lab" for="f-note">세부 메모 <span class="muted" style="font-weight:400">(선택)</span></label><span class="note-count" id="noteCount">${(f.note || '').length}/${NOTE_MAX}</span></div><textarea class="input note-in" id="f-note" rows="3" maxlength="${NOTE_MAX}" placeholder="예: 친구 3명과 저녁, 1인당 12,000원씩 보내 주기로 함">${esc(f.note || '')}</textarea><div class="chips note-chips" role="group" aria-label="메모에 넣기">${NOTE_TAGS.map(x => `<button class="chip" type="button" data-act="note-tag" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div></div>` : `<button class="card-link note-open" type="button" data-act="note-open">📝 세부 메모 추가</button>`}
     <div class="field"><label class="lab" for="f-date">날짜</label><div class="field-row"><input class="input" type="date" id="f-date" value="${f.date}" required><div class="chips"><button class="chip" type="button" id="fd-0" data-act="f-day" data-d="0" ${pressed(f.date === t)}>오늘</button><button class="chip" type="button" id="fd-1" data-act="f-day" data-d="-1" ${pressed(f.date === addDays(t, -1))}>어제</button></div></div></div>
     ${f.kind === 'out' ? `<div class="field"><span class="lab" id="mLab">결제수단</span><div class="chips" role="group" aria-labelledby="mLab">${cfg().methods.map(m => `<button class="chip" type="button" id="fm-${esc(m.id)}" data-act="f-method" data-id="${esc(m.id)}" ${pressed(f.method === m.id)}>${esc(m.name)}</button>`).join('') || '<span class="muted" style="font-size:13px">설정에서 결제수단을 추가할 수 있어요</span>'}</div></div>` : ''}
     ${acctField(f)}
@@ -1180,16 +1186,18 @@ function syncTxSheet() {
   const save = $('#f-save'); if (save) save.disabled = !(F.amount > 0);
   if (F.dupOk) { F.dupOk = false; const h = $('#dupHint'); if (h) h.textContent = ''; if (save) save.textContent = F.id ? '고친 내용 저장' : '저장하기'; }
 }
+let memoLearnT = 0;
 function learnFromMemo() {
   if (!F || F.mode !== 'tx' || F.catTouched) return;
   const m = F.memo.trim();
   if (!m) return;
   const hit = allTxs().find(t => t.kind === F.kind && t.memo === m && !t.sub);
-  if (!hit || !catOf(hit.cat).id) return;
+  if (!hit || !catOf(hit.cat).id) { const h = $('#learnHint'); if (h) h.textContent = ''; return; }
   F.cat = hit.cat;
   const meth = F.kind === 'out' && hit.method && methodOf(hit.method);
   if (meth) F.method = hit.method;
   syncTxSheet();
+  refreshAcctField();
   $('#learnHint').textContent = `지난번처럼 ‘${catOf(F.cat).name}’${meth ? `, ${meth.name}` : ''}(으)로 골라 뒀어요`;
 }
 function saveTx() {
@@ -1781,8 +1789,8 @@ function backupData() {
 }
 function csvData() {
   const q = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const rows = [['날짜', '구분', '금액', '카테고리', '내용', '결제수단']];
-  for (const t of [...allTxs()].reverse()) rows.push([t.date, t.kind === 'in' ? '수입' : t.kind === 'move' ? '이체' : '지출', t.kind === 'in' ? t.amount : t.kind === 'move' ? t.amount : -t.amount, t.kind === 'move' ? `${(acctOf(t.from) || {}).name || ''} → ${(acctOf(t.to) || {}).name || ''}` : catOf(t.cat).name, t.memo, (methodOf(t.method) || {}).name || '']);
+  const rows = [['날짜', '구분', '금액', '카테고리', '내용', '결제수단', '세부 메모']];
+  for (const t of [...allTxs()].reverse()) rows.push([t.date, t.kind === 'in' ? '수입' : t.kind === 'move' ? '이체' : '지출', t.kind === 'in' ? t.amount : t.kind === 'move' ? t.amount : -t.amount, t.kind === 'move' ? `${(acctOf(t.from) || {}).name || ''} → ${(acctOf(t.to) || {}).name || ''}` : catOf(t.cat).name, t.memo, (methodOf(t.method) || {}).name || '', t.note || '']);
   return '﻿' + rows.map(r => r.map(q).join(',')).join('\r\n');
 }
 async function saveFile(filename, data) {
@@ -2879,7 +2887,7 @@ function spendMemo(id) {
   const t = todayStr();
   openTxSheet({});
   if (!F || F.mode !== 'tx') return;
-  Object.assign(F, { kind: 'out', memo: m.name, amount: m.amount || 0, cat: m.cat || F.cat, catTouched: true, date: m.date && m.date <= t ? m.date : t, memoId: id });
+  Object.assign(F, { kind: 'out', memo: m.name, note: m.note || '', amount: m.amount || 0, cat: m.cat || F.cat, catTouched: true, date: m.date && m.date <= t ? m.date : t, memoId: id });
   rerenderSheet(txSheet());
   const a = $('#f-amount'); if (a) { a.focus(); a.select(); }
 }
@@ -3831,6 +3839,15 @@ const ACT = {
   'add-cat': () => openCatSheet(null, S.setKind),
   'cat-icon': el => openCatSheet(el.dataset.id),
   'nc-open': () => { F.nc = { name: '', emoji: '🏷️', color: '', iconTouched: false }; F.ip = { open: true, q: '', grp: recentIcons().length ? 'recent' : 'food' }; rerenderSheet(txSheet()); const n = $('#nc-name'); if (n) n.focus(); },
+  'note-open': () => { F.noteOpen = true; rerenderSheet(txSheet()); const n = $('#f-note'); if (n) n.focus(); },
+  'note-tag': el => {
+    const n = $('#f-note'); if (!n) return;
+    const cur = n.value.replace(/\s+$/, ''), add = el.dataset.v + ': ';
+    n.value = (cur ? cur + '\n' : '') + add;
+    F.note = n.value.slice(0, NOTE_MAX); n.value = F.note;
+    const c = $('#noteCount'); if (c) c.textContent = `${F.note.length}/${NOTE_MAX}`;
+    n.focus(); n.setSelectionRange(n.value.length, n.value.length);
+  },
   'nc-cancel': () => { F.nc = null; rerenderSheet(txSheet()); },
   'nc-save': () => { const id = addCategory(F.kind, F.nc); if (!id) return; F.cat = id; F.catTouched = true; F.nc = null; rerenderSheet(txSheet()); },
   'nc-color': el => { const t = pickTarget(); if (!t) return; t.color = el.dataset.v; refreshPickerBits(); },
@@ -4008,7 +4025,8 @@ document.addEventListener('input', e => {
   if (!F) return;
   if (F.mode === 'acct') { if (el.id === 'a-name') { F.name = el.value; const b = $('#a-save'); if (b) b.disabled = !canSaveAcct(); } else if (el.id === 'a-bank') F.bank = el.value; return; }
   if (F.mode === 'memo') { if (el.id === 'm-name') { F.name = el.value; refreshMemoHints(); } else if (el.id === 'm-note') F.note = el.value; return; }
-  if (el.id === 'f-memo') { F.memo = el.value; if (!F.catTouched) $('#learnHint').textContent = ''; }
+  if (el.id === 'f-memo') { F.memo = el.value; clearTimeout(memoLearnT); memoLearnT = setTimeout(learnFromMemo, 450); } // learn while typing, so nothing jumps when the field loses focus
+  else if (el.id === 'f-note') { F.note = el.value; const c = $('#noteCount'); if (c) c.textContent = `${el.value.length}/${NOTE_MAX}`; }
   else if (el.id === 's-name') { F.name = el.value; $('#s-save').disabled = !canSaveSub(); }
   else if (el.id === 's-emoji') F.emoji = el.value;
 });
@@ -4025,7 +4043,7 @@ document.addEventListener('change', e => {
   if ((el.id === 'lk-g1' || el.id === 'lk-g2') && isHex(el.value)) { saveLook({ [el.id === 'lk-g1' ? 'g1' : 'g2']: el.value.toUpperCase() }); return; }
   if (!F) return;
   switch (el.id) {
-    case 'f-memo': F.memo = el.value; learnFromMemo(); break;
+    case 'f-memo': F.memo = el.value; clearTimeout(memoLearnT); memoLearnT = setTimeout(learnFromMemo, 320); break; // after the tap that moved focus has landed
     case 'f-date': if (isYmd(el.value)) { F.date = el.value; syncTxSheet(); } break;
     case 'm-date': F.date = isYmd(el.value) ? el.value : ''; rerenderSheet(memoSheet()); break;
     case 's-day': F.day = +el.value; rerenderSheet(subSheet()); break;
@@ -4073,7 +4091,7 @@ document.addEventListener('keydown', e => {
   if ($('#sheetWrap').hidden) return;
   if (e.key === 'Escape') { e.preventDefault(); closeSheet(); return; }
   if (e.key === 'Tab') { // keep focus inside the open sheet
-    const els = [...$('#sheet').querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled])')].filter(x => x.offsetParent !== null);
+    const els = [...$('#sheet').querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])')].filter(x => x.offsetParent !== null);
     if (!els.length) return;
     const first = els[0], last = els[els.length - 1];
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
