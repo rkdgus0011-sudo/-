@@ -127,7 +127,7 @@ let F = null; // open sheet's form state
 /* ================= settings / lookups ================= */
 function normSettings(st) {
   const s = st && typeof st === 'object' ? st : {};
-  const cats = Array.isArray(s.cats) && s.cats.length ? s.cats.filter(c => c && c.id && (c.kind === 'in' || c.kind === 'out')).map(c => ({ id: c.id, name: c.name || '이름 없음', emoji: c.emoji || '🏷️', kind: c.kind })) : DEFAULT_CATS;
+  const cats = Array.isArray(s.cats) && s.cats.length ? s.cats.filter(c => c && c.id && (c.kind === 'in' || c.kind === 'out')).map(c => ({ id: c.id, name: c.name || '이름 없음', emoji: c.emoji || '🏷️', kind: c.kind, ...(/^#[0-9a-fA-F]{6}$/.test(c.color || '') ? { color: c.color } : {}) })) : DEFAULT_CATS;
   const methods = Array.isArray(s.methods) ? s.methods.filter(m => m && m.id).map(m => ({ id: m.id, name: m.name || '이름 없음' })) : DEFAULT_METHODS;
   const b = s.budget && typeof s.budget === 'object' ? s.budget : {};
   const theme = ['forest', 'ocean', 'sunset', 'lavender', 'blossom', 'graphite', 'hanji', 'citrus', 'sky', 'mintchoco', 'night', 'cocoa', 'wine', 'neon', 'custom'].includes(s.theme) ? s.theme : 'forest';
@@ -531,7 +531,7 @@ function txRow(t) {
   const c = catOf(t.cat), m = t.kind === 'out' ? methodOf(t.method) : null;
   const sub = [c.name]; if (m) sub.push(m.name);
   return `<button class="tx" type="button" data-act="edit-tx" data-id="${esc(t.id)}">
-    <span class="emo" aria-hidden="true">${esc(c.emoji)}</span>
+    <span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span>
     <span class="tx-main"><span class="tx-title">${esc(t.memo || c.name)}${t.sub ? '<span class="tag sub">정기</span>' : ''}${t.loan ? '<span class="tag sub">대출</span>' : ''}${t.ex ? '<span class="tag">예시</span>' : ''}</span><span class="tx-sub">${esc(sub.join(' · '))}</span></span>
     <span class="tx-amt${t.kind === 'in' ? ' in' : ''}">${signed(t.amount, t.kind)}</span>
   </button>`;
@@ -636,7 +636,7 @@ function vHome() {
   const catRows = shown.map(([id, v]) => {
     const c = catOf(id);
     return `<button class="rank-row" type="button" data-act="filter-cat" data-cat="${esc(id)}" aria-label="${esc(c.name)} ${won(v)}, 내역 보기">
-      <span class="emo" aria-hidden="true">${esc(c.emoji)}</span>
+      <span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span>
       <span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(c.name)}</span><span class="rank-amt">${won(v)}</span></span><span class="bar"><span style="width:${(v / maxC * 100).toFixed(1)}%"></span></span></span>
       <span class="rank-pct">${pct(v)}</span></button>`;
   }).join('') + (rest.length ? (() => {
@@ -1022,7 +1022,7 @@ function vBudget() {
       <p class="bud-foot">${bs.foot}</p></section>`;
   const rows = withB.map(c => {
     const B = +b.cats[c.id], s = by[c.id] || 0, pct = s / B, st = stateOf(pct), left = B - s;
-    return `<div class="bud-row"><span class="emo" aria-hidden="true">${esc(c.emoji)}</span><div>
+    return `<div class="bud-row"><span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span><div>
       <div class="bud-top"><span class="bud-name">${esc(c.name)}${stateChip(st, left)}</span><span class="bud-nums"><b>${won(s)}</b> / ${won(B)}</span></div>
       ${meter(pct, st, true)}
       <p class="bud-left">${left >= 0 ? `${won(left)} 남음` : `${won(-left)} 초과`} · ${Math.round(pct * 100)}%</p></div></div>`;
@@ -1031,7 +1031,7 @@ function vBudget() {
     : `<section class="card">${emptyBox('카테고리별 예산은 아직 없어요', '식비, 카페처럼 자주 넘치는 곳만 정해 둬도 좋아요.', `<button class="btn btn-soft btn-sm" type="button" data-act="edit-budget">카테고리 예산 정하기</button>`)}</section>`;
   const others = noB.length ? `<section class="card"><div class="card-h"><h2 class="card-t">예산 밖 지출</h2><span class="muted" style="font-size:13px">${won(sum(noB.map(x => x[1])))}</span></div><div class="rank">${noB.map(([id, v]) => {
     const c = catOf(id);
-    return `<button class="rank-row" type="button" data-act="filter-cat" data-cat="${esc(id)}"><span class="emo" aria-hidden="true">${esc(c.emoji)}</span><span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(c.name)}</span><span class="rank-amt">${won(v)}</span></span></span><span class="rank-pct">${icon('right', 'sm')}</span></button>`;
+    return `<button class="rank-row" type="button" data-act="filter-cat" data-cat="${esc(id)}"><span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span><span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(c.name)}</span><span class="rank-amt">${won(v)}</span></span></span><span class="rank-pct">${icon('right', 'sm')}</span></button>`;
   }).join('')}</div></section>` : '';
   return head + `<div class="cols"><div class="col">${total}${cats}</div><div class="col">${others}</div></div>`;
 }
@@ -1048,7 +1048,7 @@ function vSettings() {
       <section class="card">
         <div class="card-h"><h2 class="card-t">카테고리</h2><div class="seg" role="group" aria-label="카테고리 구분"><button type="button" id="sk-out" data-act="set-kind" data-kind="out" aria-pressed="${kind === 'out'}">지출</button><button type="button" id="sk-in" data-act="set-kind" data-kind="in" aria-pressed="${kind === 'in'}">수입</button></div></div>
         <div class="set-list">${cats.map(c => `<div class="set-row">
-          <input class="input emoji" id="ce-${esc(c.id)}" data-cat="${esc(c.id)}" data-field="emoji" value="${esc(c.emoji)}" aria-label="${esc(c.name)} 아이콘" maxlength="8" autocomplete="off" ${ro}>
+          <button class="input emoji emoji-btn" type="button" id="ce-${esc(c.id)}" data-act="cat-icon" data-id="${esc(c.id)}" aria-label="${esc(c.name)} 아이콘 바꾸기"${ccStyle(c)} ${ro}>${esc(c.emoji)}</button>
           <input class="input" id="cn-${esc(c.id)}" data-cat="${esc(c.id)}" data-field="name" value="${esc(c.name)}" aria-label="카테고리 이름" maxlength="20" autocomplete="off" ${ro}>
           <button class="icon-btn" type="button" data-act="del-cat" data-id="${esc(c.id)}" aria-label="${esc(c.name)} 삭제" title="${used[c.id] ? `기록 ${used[c.id]}건에 쓰였어요` : '삭제'}" ${ro}>${icon('trash')}</button></div>`).join('')}</div>
         <button class="btn btn-soft btn-sm set-add" type="button" data-act="add-cat" ${ro}>${icon('plus')}카테고리 추가</button>
@@ -1151,7 +1151,8 @@ function txSheet() {
     </div>
     ${f.kind === 'move' ? moveFields(f) : ''}
     <div class="field"${f.kind === 'move' ? ' style="display:none"' : ''}><span class="lab" id="catLab">카테고리</span>
-      <div class="cat-grid" role="group" aria-labelledby="catLab">${catsOf(f.kind).map(c => `<button class="cat-opt" type="button" id="fc-${esc(c.id)}" data-act="f-cat" data-id="${esc(c.id)}" ${pressed(f.cat === c.id)}><span class="e" aria-hidden="true">${esc(c.emoji)}</span>${esc(c.name)}</button>`).join('')}</div>
+      <div class="cat-grid" role="group" aria-labelledby="catLab">${catsOf(f.kind).map(c => `<button class="cat-opt" type="button" id="fc-${esc(c.id)}" data-act="f-cat" data-id="${esc(c.id)}" ${pressed(f.cat === c.id)}><span class="e" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span>${esc(c.name)}</button>`).join('')}${f.nc ? '' : `<button class="cat-opt cat-new" type="button" id="fc-new" data-act="nc-open" ${S.mode === 'denied' ? 'disabled' : ''}><span class="e" aria-hidden="true">＋</span>새 카테고리</button>`}</div>
+      ${ncBlock(f)}
       <p class="learn" id="learnHint" aria-live="polite"></p>
     </div>
     <div class="field"><label class="lab" for="f-memo">내용</label><input class="input" id="f-memo" list="memoList" maxlength="40" placeholder="${f.kind === 'move' ? '예: 비상금 옮기기, 지역화폐 충전' : f.kind === 'in' ? '예: 10월 급여' : '예: 점심, 마트 장보기'}" value="${esc(f.memo)}"><datalist id="memoList">${memoSuggestions(f.kind).map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist></div>
@@ -1311,7 +1312,7 @@ function budgetSheet() {
     <div class="sheet-h"><h2 id="sheetTitle">예산 편집</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
     <div class="field"><label class="lab" for="b-total">한 달 전체 예산</label><div class="amt"><input id="b-total" inputmode="numeric" placeholder="${cs ? fmt(cs) : '0'}" value="${f.total ? fmt(f.total) : ''}" aria-describedby="bHint"><span>원</span></div><p class="amt-hint" id="bHint">${budHint()}</p></div>
     <div class="field"><span class="lab">카테고리별 예산 <span class="muted" style="font-weight:400">· 필요한 곳만</span></span>
-      <div class="b-grid">${catsOf('out').map(c => `<label class="b-item" for="b-${esc(c.id)}"><span class="emo" aria-hidden="true">${esc(c.emoji)}</span><span>${esc(c.name)}</span><input class="input" id="b-${esc(c.id)}" data-bcat="${esc(c.id)}" inputmode="numeric" placeholder="없음" value="${f.cats[c.id] ? fmt(f.cats[c.id]) : ''}"></label>`).join('')}</div></div>
+      <div class="b-grid">${catsOf('out').map(c => `<label class="b-item" for="b-${esc(c.id)}"><span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span><span>${esc(c.name)}</span><input class="input" id="b-${esc(c.id)}" data-bcat="${esc(c.id)}" inputmode="numeric" placeholder="없음" value="${f.cats[c.id] ? fmt(f.cats[c.id]) : ''}"></label>`).join('')}</div></div>
     <div class="sheet-actions"><button class="btn btn-primary btn-block" type="submit">저장하기</button></div>
   </form>`;
 }
@@ -2481,7 +2482,7 @@ function vStats() {
       const k = catOf(c.id);
       const dl = c.d == null ? `${c.n}건` : c.d > 0 ? `<span class="dlt up">▲ ${won(c.d)}</span>` : c.d < 0 ? `<span class="dlt down">▼ ${won(-c.d)}</span>` : '<span class="dlt">변화 없음</span>';
       return `<button class="rank-row" type="button" data-act="filter-cat" data-cat="${esc(c.id)}" aria-label="${esc(k.name)} ${won(c.v)}, 내역 보기">
-        <span class="emo" aria-hidden="true">${esc(k.emoji)}</span>
+        <span class="emo" aria-hidden="true"${ccStyle(k)}>${esc(k.emoji)}</span>
         <span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(k.name)}</span><span class="rank-amt">${won(c.v)}</span></span><span class="bar"><span style="width:${(c.v / maxC * 100).toFixed(1)}%"></span></span><span class="rank-sub">${dl}</span></span>
         <span class="rank-pct">${share(c.v, D.tot.out)}</span></button>`;
     }).join('')}</div>` : emptyBox('지출이 아직 없어요', '')}
@@ -2789,7 +2790,7 @@ function oftenMode(ym) {
       const c = catOf(x.cat);
       const spread = x.min === x.max ? `매번 ${won(x.min)}` : `${won(x.min)}~${won(x.max)}`;
       return `<div class="often-row">
-        <span class="emo" aria-hidden="true">${esc(c.emoji)}</span>
+        <span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span>
         <span class="rank-main"><span class="rank-line"><span class="rank-name">${esc(x.name)}</span><span class="rank-amt">${won(x.total)}</span></span><span class="bar"><span style="width:${(x.n / maxN * 100).toFixed(1)}%"></span></span><span class="rank-sub"><b>${x.n}번</b> · 평균 ${won(x.avg)} · ${spread} · 마지막 ${mdLabel(x.last.date)}</span></span>
         <div class="often-acts"><button class="btn btn-soft btn-sm" type="button" data-act="often-again" data-k="${esc(x.k)}" ${S.mode === 'denied' ? 'disabled' : ''}>${icon('plus', 'sm')}다시 기록</button><button class="btn btn-ghost btn-sm" type="button" data-act="st-search" data-q="${esc(x.name)}">내역 보기</button></div>
       </div>`;
@@ -2844,7 +2845,7 @@ function memoSheet() {
     <p class="set-note">앞으로 쓸 돈을 미리 적어 두면 남은 예산에서 빼고 보여 드려요. 실제로 쓰면 ‘썼어요’로 바로 기록이 돼요.</p>
     <div class="field"><label class="lab" for="m-name">무엇을 살 건가요?</label><input class="input" id="m-name" list="memoList2" maxlength="40" placeholder="예: 겨울 패딩, 친구 생일 선물" value="${esc(f.name)}"><datalist id="memoList2">${memoSuggestions('out').map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist><div id="memoHints" aria-live="polite">${memoHints()}</div></div>
     <div class="field"><label class="lab" for="m-amount">얼마쯤 쓸까요? <span class="muted" style="font-weight:400">(대략이어도 괜찮아요)</span></label><div class="amt"><input id="m-amount" inputmode="numeric" placeholder="0" value="${f.amount ? fmt(f.amount) : ''}"><span>원</span></div></div>
-    <div class="field"><span class="lab" id="mcLab">카테고리</span><div class="cat-grid" role="group" aria-labelledby="mcLab">${catsOf('out').map(c => `<button class="cat-opt" type="button" id="mc-${esc(c.id)}" data-act="memo-cat" data-id="${esc(c.id)}" ${pressed(f.cat === c.id)}><span class="e" aria-hidden="true">${esc(c.emoji)}</span>${esc(c.name)}</button>`).join('')}</div></div>
+    <div class="field"><span class="lab" id="mcLab">카테고리</span><div class="cat-grid" role="group" aria-labelledby="mcLab">${catsOf('out').map(c => `<button class="cat-opt" type="button" id="mc-${esc(c.id)}" data-act="memo-cat" data-id="${esc(c.id)}" ${pressed(f.cat === c.id)}><span class="e" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span>${esc(c.name)}</button>`).join('')}</div></div>
     <div class="field"><label class="lab" for="m-date">언제 쓸까요?</label><div class="field-row"><input class="input" type="date" id="m-date" value="${f.date}" min="${isEdit ? '' : t}"><div class="chips"><button class="chip" type="button" data-act="memo-date" data-v="${sat}" ${pressed(f.date === sat)}>이번 주말</button><button class="chip" type="button" data-act="memo-date" data-v="" ${pressed(!f.date)}>날짜 미정</button></div></div></div>
     <div class="field"><label class="lab" for="m-note">메모 <span class="muted" style="font-weight:400">(선택)</span></label><input class="input" id="m-note" maxlength="60" placeholder="예: 블랙프라이데이 때 사기" value="${esc(f.note)}"></div>
     <div class="sheet-actions">${isEdit ? `<button class="btn btn-danger" type="button" data-act="memo-delete">${icon('trash')}삭제</button>` : ''}<button class="btn btn-primary btn-block" type="submit" id="m-save" ${canSaveMemo() ? '' : 'disabled'}>${isEdit ? '고친 내용 저장' : '메모하기'}</button></div>
@@ -2907,7 +2908,7 @@ function memoRow(m, compact) {
   const t = todayStr(), c = catOf(m.cat);
   const when = m.date ? `${mdw(m.date)}${m.date >= t ? ` · ${ddayText(m.date)}` : ' · 지났어요'}` : '날짜 미정';
   return `<div class="plan-row memo-row${m.date && m.date < t ? ' late' : ''}">
-    <span class="emo" aria-hidden="true">${esc(c.emoji)}</span>
+    <span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span>
     <span class="tx-main"><span class="tx-title">${esc(m.name)}<span class="tag plan">메모</span>${m.ex ? '<span class="tag">예시</span>' : ''}</span><span class="tx-sub">${esc(when)}${m.note ? ' · ' + esc(m.note) : ''}</span></span>
     <span class="tx-amt plan-amt">${m.amount ? won(m.amount) : '금액 미정'}</span>
     <div class="plan-acts">
@@ -2946,7 +2947,7 @@ function planMode(ym) {
   const closedRows = closed.map(m => {
     const c = catOf(m.cat), d = m.status === 'done' && m.amount ? m.amount - (m.spent || 0) : 0;
     const res = m.status === 'drop' ? `안 사기로 했어요${m.amount ? ` · ${won(m.amount)} 아낌` : ''}` : `${won(m.spent || 0)} 썼어요${m.amount ? (d > 0 ? ` · 메모보다 ${won(d)} 덜` : d < 0 ? ` · 메모보다 ${won(-d)} 더` : ' · 메모대로') : ''}`;
-    return `<div class="tx memo-closed"><span class="emo" aria-hidden="true">${esc(c.emoji)}</span><span class="tx-main"><span class="tx-title">${esc(m.name)}</span><span class="tx-sub">${mdLabel(m.doneAt)} · ${esc(res)}</span></span><button class="icon-btn" type="button" data-act="memo-undo" data-id="${esc(m.id)}" aria-label="${esc(m.name)} 다시 메모로 돌리기">${icon('repeat')}</button></div>`;
+    return `<div class="tx memo-closed"><span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span><span class="tx-main"><span class="tx-title">${esc(m.name)}</span><span class="tx-sub">${mdLabel(m.doneAt)} · ${esc(res)}</span></span><button class="icon-btn" type="button" data-act="memo-undo" data-id="${esc(m.id)}" aria-label="${esc(m.name)} 다시 메모로 돌리기">${icon('repeat')}</button></div>`;
   }).join('');
   return head + `<div class="memo-list">${sec('날짜 정한 것', dated)}${sec('날짜 미정', undated)}</div>`
     + (closed.length ? `<div class="memo-done"><p class="memo-sec">${mLabel(ym)}에 끝낸 메모 <span class="muted">${done.length ? `썼어요 ${done.length}건` : ''}${done.length && dropped.length ? ' · ' : ''}${dropped.length ? `안 사기로 ${dropped.length}건` : ''}</span></p>
@@ -3476,6 +3477,200 @@ function lookCard() {
   </section>`;
 }
 
+/* ================= 카테고리 아이콘 고르기 ================= */
+// [아이콘, 찾는 말] — 검색과 이름에 맞는 아이콘 추천에 써요
+const ICON_GROUPS = [
+  { id: 'food', name: '음식', items: [
+    ['🍚', '밥 식사 한식 식비'], ['🍜', '라면 국수 면 우동'], ['🍝', '파스타 스파게티 양식'], ['🍛', '카레 덮밥'], ['🍲', '찌개 국 탕 전골'], ['🍱', '도시락 배달'],
+    ['🍣', '초밥 회 일식'], ['🍤', '튀김 새우'], ['🍙', '삼각김밥 주먹밥 편의점'], ['🥟', '만두 중식'], ['🍗', '치킨 닭'], ['🍖', '고기 갈비'],
+    ['🥩', '소고기 스테이크 정육'], ['🍔', '햄버거 패스트푸드'], ['🍟', '감자튀김'], ['🍕', '피자'], ['🌭', '핫도그'], ['🌮', '타코 멕시칸'],
+    ['🥪', '샌드위치'], ['🥗', '샐러드 다이어트'], ['🥘', '요리 냄비'], ['🍳', '계란 아침 요리'], ['🥞', '팬케이크 브런치'], ['🥐', '빵 크루아상 베이커리'],
+    ['🍞', '식빵 빵집'], ['🧀', '치즈'], ['🍢', '어묵 분식 떡볶이'], ['🍡', '떡'], ['🍰', '케이크 디저트'], ['🎂', '생일 케이크'],
+    ['🧁', '컵케이크'], ['🍩', '도넛'], ['🍪', '쿠키 과자'], ['🍫', '초콜릿'], ['🍬', '사탕'], ['🍦', '아이스크림'],
+    ['🍧', '빙수'], ['🍿', '팝콘 간식'], ['🍎', '사과 과일'], ['🍊', '귤 감귤 과일'], ['🍌', '바나나'], ['🍉', '수박'],
+    ['🍇', '포도'], ['🍓', '딸기'], ['🍑', '복숭아'], ['🥑', '아보카도'], ['🥦', '채소 야채 브로콜리'], ['🥕', '당근 채소'],
+    ['🌽', '옥수수'], ['🥔', '감자'], ['🍄', '버섯'], ['🥜', '견과 땅콩'], ['🛒', '장보기 마트 식료품'], ['🥡', '포장 테이크아웃 중식'],
+  ] },
+  { id: 'drink', name: '음료·카페', items: [
+    ['☕', '커피 카페 아메리카노'], ['🍵', '차 녹차'], ['🧋', '버블티 밀크티'], ['🥤', '음료 탄산 주스'], ['🧃', '주스'], ['🥛', '우유'],
+    ['🍺', '맥주 술 호프'], ['🍻', '술자리 회식 건배'], ['🍷', '와인'], ['🥂', '샴페인 축하'], ['🍸', '칵테일 바'], ['🍶', '소주 사케 전통주'],
+    ['🍹', '칵테일 휴가'], ['🧉', '음료'], ['🫖', '차 티타임'],
+  ] },
+  { id: 'shop', name: '쇼핑·패션', items: [
+    ['🛍️', '쇼핑 구매'], ['👕', '옷 티셔츠 의류'], ['👖', '바지 청바지'], ['👗', '원피스 드레스'], ['🧥', '외투 코트 패딩'], ['👚', '블라우스'],
+    ['👟', '운동화 신발'], ['👠', '구두 힐'], ['👜', '가방 핸드백'], ['🎒', '백팩 가방'], ['👛', '지갑'], ['🧢', '모자'],
+    ['🕶️', '선글라스'], ['👓', '안경'], ['💍', '반지 주얼리 액세서리'], ['⌚', '시계'], ['🧦', '양말'], ['🧣', '목도리'],
+    ['💄', '화장품 메이크업 뷰티'], ['💅', '네일'], ['🧴', '로션 스킨케어'], ['🧼', '비누 세제'], ['📦', '택배 온라인 쇼핑'], ['🏷️', '할인 세일 기타'],
+  ] },
+  { id: 'home', name: '집·생활', items: [
+    ['🏠', '집 월세 주거'], ['🏢', '관리비 아파트 오피스텔'], ['🛏️', '침대 가구'], ['🛋️', '소파 인테리어'], ['🪑', '의자 가구'], ['🚿', '샤워 욕실'],
+    ['🧺', '빨래 세탁 생활'], ['🧹', '청소'], ['🧻', '휴지 생필품'], ['🧽', '주방 설거지'], ['🔑', '열쇠 보증금'], ['💡', '전기 공과금'],
+    ['🔥', '가스 난방'], ['💧', '수도 물'], ['🪴', '화분 식물'], ['🔧', '수리 공구'], ['🧰', '공구 수리'], ['🗑️', '쓰레기'],
+    ['🧯', '안전'], ['🕯️', '향초 캔들'], ['🖼️', '액자 소품'], ['🪞', '거울'],
+  ] },
+  { id: 'move', name: '교통·차', items: [
+    ['🚌', '버스 교통'], ['🚇', '지하철'], ['🚆', '기차'], ['🚄', 'KTX 고속열차'], ['🚕', '택시'], ['🚗', '자동차 차'],
+    ['🚙', 'SUV 차'], ['⛽', '주유 기름 연료'], ['🅿️', '주차'], ['🛣️', '고속도로 톨게이트 통행료'], ['🏍️', '오토바이'], ['🛵', '스쿠터 배달'],
+    ['🚲', '자전거 따릉이'], ['🛴', '킥보드 킥고잉'], ['✈️', '비행기 항공'], ['🚢', '배 여객선'], ['🚤', '보트'], ['🚐', '렌터카 승합차'],
+    ['🔩', '정비 차량'], ['🚦', '교통 신호'],
+  ] },
+  { id: 'digital', name: '통신·디지털', items: [
+    ['📱', '휴대폰 통신비 핸드폰'], ['💻', '노트북 컴퓨터'], ['🖥️', '모니터 컴퓨터'], ['⌨️', '키보드'], ['🖱️', '마우스'], ['🎧', '이어폰 헤드폰'],
+    ['📺', 'TV 구독 OTT 넷플릭스'], ['🎮', '게임'], ['🕹️', '게임 오락'], ['📷', '카메라'], ['🔋', '배터리 충전'], ['🌐', '인터넷 와이파이'],
+    ['☁️', '클라우드 저장공간'], ['🎵', '음악 스트리밍 멜론'], ['📡', '통신 위성'], ['🤖', 'AI 앱 구독'],
+  ] },
+  { id: 'health', name: '건강·운동', items: [
+    ['💊', '약 약국 의료'], ['🏥', '병원'], ['🩺', '진료 검진'], ['🦷', '치과'], ['👁️', '안과 렌즈'], ['🩹', '밴드 응급'],
+    ['💉', '주사 예방접종'], ['🏋️', '헬스 운동 피트니스'], ['🧘', '요가 필라테스 명상'], ['🏃', '러닝 달리기'], ['🚴', '자전거 운동'], ['🏊', '수영'],
+    ['⚽', '축구'], ['🏀', '농구'], ['⚾', '야구'], ['🎾', '테니스'], ['🏸', '배드민턴'], ['⛳', '골프'],
+    ['🎳', '볼링'], ['🧗', '클라이밍'], ['💆', '마사지'], ['💇', '미용실 헤어 커트'], ['🧖', '사우나 찜질방'], ['🛡️', '보험'],
+  ] },
+  { id: 'study', name: '교육·일', items: [
+    ['📚', '책 도서 교육'], ['📖', '독서'], ['📝', '시험 공부 메모'], ['✏️', '문구 필기'], ['🎓', '학비 등록금 대학'], ['🏫', '학원 학교'],
+    ['💼', '업무 회사 출장'], ['📊', '자격증 강의'], ['🖨️', '인쇄 복사'], ['📎', '사무용품'], ['🧑‍💻', '코딩 개발 온라인강의'], ['🗣️', '어학 영어 회화'],
+    ['🎹', '음악 레슨 피아노'], ['🖍️', '미술 아이'], ['🔬', '과학 실험'], ['📮', '우편 등기'],
+  ] },
+  { id: 'fun', name: '문화·여가', items: [
+    ['🎬', '영화 극장'], ['🎟️', '티켓 공연'], ['🎤', '노래방 콘서트'], ['🎸', '기타 악기'], ['🎨', '그림 취미 미술'], ['🎭', '연극 뮤지컬'],
+    ['🎪', '축제 페스티벌'], ['🎡', '놀이공원'], ['🎲', '보드게임'], ['🧩', '퍼즐 취미'], ['🎯', '다트 취미'], ['🎣', '낚시'],
+    ['🏕️', '캠핑'], ['⛺', '텐트 캠핑'], ['🏖️', '바다 해변'], ['⛰️', '등산 산'], ['📸', '사진 촬영'], ['🧶', '뜨개질 공예'],
+    ['🪁', '연'], ['🎧', '음악 감상'], ['📕', '만화 웹툰'], ['🎰', '복권 로또'],
+  ] },
+  { id: 'travel', name: '여행', items: [
+    ['🧳', '여행 캐리어'], ['🏨', '호텔 숙소 숙박'], ['🗺️', '여행 지도'], ['🌍', '해외여행'], ['🏝️', '휴양 섬 제주'], ['🗼', '해외 관광'],
+    ['🏯', '관광 문화재'], ['🛫', '출국 항공권'], ['🚠', '케이블카'], ['🌋', '관광 자연'], ['🎑', '명절 추석'], ['🛂', '여권 비자'],
+  ] },
+  { id: 'people', name: '사람·마음', items: [
+    ['🎁', '선물 경조사'], ['💐', '꽃 꽃다발'], ['💝', '선물 기념일'], ['💌', '편지 축의금'], ['🎉', '축하 파티'], ['🎈', '파티 생일'],
+    ['💒', '결혼 결혼식 축의금'], ['🕊️', '조의금 부의금'], ['👶', '아기 육아'], ['🍼', '분유 육아'], ['🧸', '장난감 아이'], ['👪', '가족'],
+    ['💑', '데이트 연애'], ['👵', '부모님 용돈 효도'], ['🙏', '기부 후원 헌금'], ['🤝', '모임 회비'], ['🧧', '세뱃돈 용돈'], ['❤️', '사랑'],
+  ] },
+  { id: 'pet', name: '반려동물', items: [
+    ['🐶', '강아지 반려견'], ['🐱', '고양이 반려묘'], ['🐰', '토끼'], ['🐹', '햄스터'], ['🐟', '물고기 어항'], ['🐦', '새'],
+    ['🐢', '거북이'], ['🦴', '간식 사료'], ['🐾', '반려동물 펫 동물병원'], ['🦮', '산책'],
+  ] },
+  { id: 'money', name: '돈·금융', items: [
+    ['💰', '돈 부수입 수입'], ['💵', '현금 지폐'], ['💳', '카드 결제'], ['🏦', '은행 금융 이자'], ['💸', '대출 상환 이체'], ['🪙', '동전 잔돈'],
+    ['📈', '투자 주식 수익'], ['📉', '손실'], ['🧾', '영수증 세금 기타'], ['🐷', '저금 적금 저축'], ['🏧', 'ATM 인출'], ['💼', '급여 월급 회사'],
+    ['🧮', '세금 회계'], ['🏛️', '공공 세금 과태료'], ['📜', '계약 증명서'], ['🎫', '상품권 쿠폰'],
+  ] },
+  { id: 'etc', name: '자연·기호', items: [
+    ['🌱', '새싹 시작'], ['🌸', '벚꽃 봄'], ['🌻', '해바라기 여름'], ['🍁', '단풍 가을'], ['⛄', '눈사람 겨울'], ['🍀', '행운'],
+    ['🌈', '무지개'], ['☀️', '해 맑음'], ['🌙', '달 밤'], ['⭐', '별 즐겨찾기'], ['✨', '반짝 특별'], ['💎', '보석 사치'],
+    ['🔔', '알림'], ['📌', '고정 중요'], ['✅', '완료 체크'], ['❗', '중요 긴급'], ['🎀', '리본'], ['🧿', '부적'],
+  ] },
+];
+const ALL_ICONS = ICON_GROUPS.flatMap(g => g.items.map(([e, k]) => ({ e, k: `${k} ${g.name}`, g: g.id })));
+const CAT_COLORS = ['', '#E5484D', '#F76B15', '#FFC53D', '#46A758', '#12A594', '#0090FF', '#3E63DD', '#8E4EC6', '#D6409F', '#AD7F58', '#8B8D98'];
+const ccStyle = c => (c && c.color ? ` style="--cc:${c.color}"` : '');
+function iconSearch(q) {
+  const s = String(q || '').trim().toLowerCase();
+  if (!s) return [];
+  const words = s.split(/\s+/);
+  return ALL_ICONS.filter(x => words.every(w => x.k.toLowerCase().includes(w) || x.e === w));
+}
+// 이름에 맞는 아이콘 추천: "고양이 사료" → 🐱 🦴 ...
+function iconSuggest(name) {
+  const toks = String(name || '').toLowerCase().split(/[\s,·/]+/).filter(t => t.length >= 1);
+  if (!toks.length) return [];
+  const score = new Map();
+  for (const x of ALL_ICONS) {
+    const keys = x.k.toLowerCase().split(' ');
+    let sc = 0;
+    for (const t of toks) for (const k of keys) { if (k === t) sc += 3; else if (t.length >= 2 && (k.includes(t) || (k.length >= 2 && t.includes(k)))) sc += 1; }
+    if (sc) score.set(x.e, Math.max(sc, score.get(x.e) || 0));
+  }
+  return [...score.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(x => x[0]);
+}
+const recentIcons = () => (Array.isArray(prefs.recentIcons) ? prefs.recentIcons.slice(0, 12) : []);
+function pushRecentIcon(e) { prefs.recentIcons = [e, ...recentIcons().filter(x => x !== e)].slice(0, 12); savePrefs(); }
+
+/* --- the picker (shared by the record sheet and the category sheet) --- */
+function iconGridHtml(ip, cur) {
+  const list = ip.q ? iconSearch(ip.q) : ip.grp === 'recent' ? recentIcons().map(e => ({ e })) : (ICON_GROUPS.find(g => g.id === ip.grp) || ICON_GROUPS[0]).items.map(([e]) => ({ e }));
+  if (!list.length) return `<p class="ip-empty">${ip.q ? `‘${esc(ip.q)}’에 맞는 아이콘이 없어요. 다른 말로 찾거나 아래에 이모지를 직접 넣어 보세요.` : '아직 고른 아이콘이 없어요.'}</p>`;
+  return list.map(x => `<button type="button" class="ip-ic" data-act="ip-pick" data-e="${esc(x.e)}" aria-pressed="${x.e === cur}" aria-label="${esc(x.e)}">${esc(x.e)}</button>`).join('');
+}
+function iconPicker(t, ip) {
+  const groups = [...(recentIcons().length ? [{ id: 'recent', name: '최근' }] : []), ...ICON_GROUPS];
+  return `<div class="ip" id="iconPicker">
+    <label class="search ip-search">${icon('search')}<span class="sr-only">아이콘 찾기</span><input class="input" id="ip-q" type="search" placeholder="찾기: 커피, 고양이, 월세…" value="${esc(ip.q)}" autocomplete="off"></label>
+    <div class="ip-groups" role="tablist" aria-label="아이콘 묶음" ${ip.q ? 'hidden' : ''}>${groups.map(g => `<button type="button" class="chip" role="tab" data-act="ip-grp" data-v="${g.id}" aria-pressed="${ip.grp === g.id}">${g.name}</button>`).join('')}</div>
+    <div class="ip-grid" id="ipGrid">${iconGridHtml(ip, t.emoji)}</div>
+    <label class="ip-own"><span>키보드 이모지로 직접</span><input class="input emoji" id="ip-own" maxlength="8" placeholder="입력" autocomplete="off"></label>
+  </div>`;
+}
+function catFormHtml(t, ip, kind) {
+  const sug = iconSuggest(t.name).filter(e => e !== t.emoji);
+  return `<div class="nc-head">
+      <button type="button" class="nc-prev" id="ncPrev" data-act="ip-toggle" aria-label="아이콘 고르기"${ccStyle(t)}>${esc(t.emoji || '🏷️')}</button>
+      <div class="field" style="flex:1;min-width:0"><label class="lab" for="nc-name">${kind === 'in' ? '수입' : '지출'} 카테고리 이름</label><input class="input" id="nc-name" maxlength="20" placeholder="${kind === 'in' ? '예: 중고거래, 이자' : '예: 반려동물, 술자리, 덕질'}" value="${esc(t.name)}" autocomplete="off"></div>
+    </div>
+    <div class="nc-sug" id="ncSug">${sug.length ? `<span>추천</span>${sug.map(e => `<button type="button" class="ip-ic sm" data-act="ip-pick" data-e="${esc(e)}" aria-label="${esc(e)}">${esc(e)}</button>`).join('')}` : ''}</div>
+    <div class="nc-colors" role="group" aria-label="색"><span>색</span>${CAT_COLORS.map(c => `<button type="button" class="nc-sw${c ? '' : ' none'}" data-act="nc-color" data-v="${c}" aria-pressed="${(t.color || '') === c}" aria-label="${c || '색 없음'}"${c ? ` style="background:${c}"` : ''}></button>`).join('')}</div>
+    ${ip.open ? iconPicker(t, ip) : ''}`;
+}
+const pickTarget = () => (F && F.mode === 'cat' ? F : F && F.nc ? F.nc : null);
+function refreshPickerBits() {
+  const t = pickTarget(); if (!t) return;
+  const p = $('#ncPrev'); if (p) { p.textContent = t.emoji || '🏷️'; if (t.color) p.style.setProperty('--cc', t.color); else p.style.removeProperty('--cc'); }
+  document.querySelectorAll('#sheet [data-act="ip-pick"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.e === t.emoji)));
+  document.querySelectorAll('#sheet [data-act="nc-color"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === (t.color || ''))));
+  const g = $('#ipGrid'); if (g && F.ip) g.innerHTML = iconGridHtml(F.ip, t.emoji);
+  const s = $('#ncSug');
+  if (s) { const sug = iconSuggest(t.name).filter(e => e !== t.emoji); s.innerHTML = sug.length ? `<span>추천</span>${sug.map(e => `<button type="button" class="ip-ic sm" data-act="ip-pick" data-e="${esc(e)}" aria-label="${esc(e)}">${esc(e)}</button>`).join('')}` : ''; }
+  const sv = $('#cat-save'); if (sv) sv.disabled = !(t.name || '').trim();
+  const ns = $('#nc-save'); if (ns) ns.disabled = !(t.name || '').trim();
+}
+// a typed name picks a fitting icon until the person chooses one
+function autoIcon(t) { if (!t.iconTouched) { const s = iconSuggest(t.name)[0]; t.emoji = s || '🏷️'; } }
+
+/* --- new category inside the record sheet --- */
+function ncBlock(f) {
+  if (!f.nc) return '';
+  return `<div class="nc-box" id="ncBox">${catFormHtml(f.nc, f.ip, f.kind)}
+    <div class="habit-acts"><button class="btn btn-primary btn-sm" type="button" id="nc-save" data-act="nc-save" ${(f.nc.name || '').trim() ? '' : 'disabled'}>추가하고 고르기</button><button class="btn btn-ghost btn-sm" type="button" data-act="nc-cancel">취소</button></div></div>`;
+}
+function addCategory(kind, t) {
+  const name = (t.name || '').trim().slice(0, 20);
+  if (!name) return null;
+  const st = cfg(), same = st.cats.find(c => c.kind === kind && c.name === name);
+  if (same) { toast(`‘${name}’ 카테고리가 이미 있어서 그걸로 골랐어요`); return same.id; }
+  const id = uid('c'), cat = { id, name, emoji: t.emoji || '🏷️', kind };
+  if (t.color) cat.color = t.color;
+  saveSettings({ ...st, cats: [...st.cats, cat] });
+  if (t.emoji) pushRecentIcon(t.emoji);
+  toast(`‘${name}’ 카테고리를 만들었어요`);
+  return id;
+}
+
+/* --- category sheet (settings) --- */
+function openCatSheet(id, kind) {
+  if (S.mode === 'denied') return;
+  const c = id && cfg().cats.find(x => x.id === id);
+  F = c ? { mode: 'cat', id, kind: c.kind, name: c.name, emoji: c.emoji, color: c.color || '', iconTouched: true, ip: { open: true, q: '', grp: recentIcons().length ? 'recent' : 'food' } }
+    : { mode: 'cat', id: null, kind: kind || 'out', name: '', emoji: '🏷️', color: '', iconTouched: false, ip: { open: true, q: '', grp: 'food' } };
+  showSheet(catSheet(), c ? null : '#nc-name');
+}
+function catSheet() {
+  const f = F;
+  return `<form id="catForm" autocomplete="off" novalidate>
+    <div class="sheet-h"><h2 id="sheetTitle">${f.id ? '카테고리 고치기' : '카테고리 만들기'}</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    ${catFormHtml(f, f.ip, f.kind)}
+    <div class="sheet-actions"><button class="btn btn-primary btn-block" type="submit" id="cat-save" ${(f.name || '').trim() ? '' : 'disabled'}>${f.id ? '고친 내용 저장' : '만들기'}</button></div>
+  </form>`;
+}
+function saveCatSheet() {
+  const f = F, name = (f.name || '').trim().slice(0, 20);
+  if (!name) return;
+  if (!f.id) { addCategory(f.kind, f); closeSheet(); return; }
+  const st = cfg();
+  saveSettings({ ...st, cats: st.cats.map(c => (c.id === f.id ? { ...c, name, emoji: f.emoji || c.emoji, color: f.color || '' } : c)) });
+  if (f.emoji) pushRecentIcon(f.emoji);
+  closeSheet();
+  toast('카테고리를 고쳤어요');
+}
+
 /* ================= toast ================= */
 let toastTimer = 0, toastUndo = null;
 function toast(msg, opts = {}) {
@@ -3564,11 +3759,15 @@ const ACT = {
   'ex-cancel': () => { S.confirmClear = false; renderNotice(); },
   'ex-clear': () => { S.confirmClear = false; clearExamples(); toast('예시를 지웠어요. 이제 내 기록을 시작해 보세요'); },
   'set-kind': el => { S.setKind = el.dataset.kind; renderView(); },
-  'add-cat': () => {
-    const st = cfg(), id = uid('c');
-    S.focusAfter = 'cn-' + id;
-    saveSettings({ ...st, cats: [...st.cats, { id, name: '새 카테고리', emoji: '🏷️', kind: S.setKind }] });
-  },
+  'add-cat': () => openCatSheet(null, S.setKind),
+  'cat-icon': el => openCatSheet(el.dataset.id),
+  'nc-open': () => { F.nc = { name: '', emoji: '🏷️', color: '', iconTouched: false }; F.ip = { open: true, q: '', grp: recentIcons().length ? 'recent' : 'food' }; rerenderSheet(txSheet()); const n = $('#nc-name'); if (n) n.focus(); },
+  'nc-cancel': () => { F.nc = null; rerenderSheet(txSheet()); },
+  'nc-save': () => { const id = addCategory(F.kind, F.nc); if (!id) return; F.cat = id; F.catTouched = true; F.nc = null; rerenderSheet(txSheet()); },
+  'nc-color': el => { const t = pickTarget(); if (!t) return; t.color = el.dataset.v; refreshPickerBits(); },
+  'ip-pick': el => { const t = pickTarget(); if (!t) return; t.emoji = el.dataset.e; t.iconTouched = true; refreshPickerBits(); },
+  'ip-grp': el => { F.ip.grp = el.dataset.v; F.ip.q = ''; document.querySelectorAll('#sheet [data-act="ip-grp"]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === F.ip.grp))); refreshPickerBits(); },
+  'ip-toggle': () => { F.ip.open = !F.ip.open; rerenderSheet(F.mode === 'cat' ? catSheet() : txSheet()); },
   'del-cat': el => {
     const st = cfg(), c = st.cats.find(x => x.id === el.dataset.id);
     if (!c) return;
@@ -3707,6 +3906,14 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'flt-q') { S.filter.q = el.value; updateListResults(); return; }
+  if (el.id === 'nc-name' || el.id === 'ip-q' || el.id === 'ip-own') {
+    const t = pickTarget(); if (!t) return;
+    if (el.id === 'nc-name') { t.name = el.value; autoIcon(t); }
+    else if (el.id === 'ip-q') { F.ip.q = el.value; const g = document.querySelector('#sheet .ip-groups'); if (g) g.hidden = !!el.value.trim(); }
+    else { const v = firstGrapheme(el.value); if (v) { t.emoji = v; t.iconTouched = true; } }
+    refreshPickerBits();
+    return;
+  }
   if (el.id === 'lk-accent' && isHex(el.value)) { applyLook({ ...look(), accent: el.value }); return; } // live preview while dragging
   if (el.id === 'ai-q') { S.aiDraft = el.value; return; }
   if (el.id === 'f-amount' || el.id === 'm-amount' || el.id === 'a-bal' || el.id === 'x-bal' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || el.id === 'q-principal' || el.id === 'q-pay' || el.id === 'q-int' || el.id === 'g-target' || el.id === 'g-monthly' || el.id === 'dep-amount' || el.id === 'su-income' || el.id === 'su-fixed' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
@@ -3778,6 +3985,9 @@ document.addEventListener('submit', e => {
   e.preventDefault();
   if (e.target && e.target.id === 'creditForm') { saveCredit(); return; }
   if (!F) return;
+  const ae = document.activeElement && document.activeElement.id;
+  if (F.nc && (ae === 'nc-name' || ae === 'ip-q' || ae === 'ip-own')) { if (ae === 'nc-name' && (F.nc.name || '').trim()) ACT['nc-save'](); return; }
+  if (F.mode === 'cat') { if (ae === 'ip-q' || ae === 'ip-own') return; saveCatSheet(); return; }
   if (F.mode === 'tx') saveTx();
   else if (F.mode === 'sub') saveSub();
   else if (F.mode === 'budget') saveBudget();
