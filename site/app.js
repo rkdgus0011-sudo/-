@@ -1809,6 +1809,7 @@ function accountCard() {
     </div>
     ${web ? `<div class="legal-row"><a href="privacy.html" target="_blank" rel="noopener">개인정보 처리방침</a><a href="terms.html" target="_blank" rel="noopener">이용약관</a><button type="button" class="leave-link" data-act="leave-ask">회원 탈퇴</button></div>` : ''}
     ${web && S.leave ? leaveNotice() : ''}
+    ${web ? `<p class="app-ver">꼬박꼬박 가계부 웹 · 버전 ${esc(window.ttbPlatform.version || '')}</p>` : ''}
     ${web ? '<p class="set-note" style="margin-top:12px"><b>폰에서 앱처럼 쓰기</b> · 안드로이드 크롬은 메뉴(⋮) → ‘홈 화면에 추가’, 아이폰 사파리는 공유 버튼 → ‘홈 화면에 추가’를 누르세요.</p>' : ''}
     ${r ? `<div class="notice warn" style="margin-top:12px"><p>${esc(r.when)}에 저장한 백업(기록 ${fmt(r.count)}건)으로 지금 기록을 모두 바꿀까요? 지금 기록은 사라져요.</p><div class="acts"><button class="btn btn-sm btn-primary" type="button" id="rsYes" data-act="restore-yes">바꾸기</button><button class="btn btn-sm btn-soft" type="button" data-act="restore-no">취소</button></div></div>` : ''}
   </section>`;

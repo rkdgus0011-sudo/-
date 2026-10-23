@@ -899,6 +899,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-varian
 .drag-h:disabled { opacity: .35; cursor: default; }
 .set-row.dragging { position: relative; z-index: 3; background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-lg); }
 .set-row.dragging .drag-h { cursor: grabbing; color: var(--accent); }
+.app-ver { margin-top: 10px; font-size: 12px; color: var(--muted); }
 
 /* ---------- web version: page base + sign-in screen ---------- */
 :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }

@@ -3,7 +3,7 @@
    - 가계부 화면(app.js)이 쓰는 저장소 API(db·user·downloads)를 Supabase 위에 만들어 줘요. */
 (() => {
 'use strict';
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 const TERMS_VERSION = '2026-10-21'; // 약관·처리방침을 크게 바꾸면 날짜를 올려 다시 동의를 받아요
 const CFG = window.TTB_CONFIG || {};
 const TABLE = 'ledger_docs';
@@ -14,7 +14,11 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&a
 try { const p = JSON.parse(localStorage.getItem('ttb-prefs') || '{}'); if (p.theme && p.theme !== 'forest') document.documentElement.setAttribute('data-pal', p.theme); } catch (e) { /* ignore */ }
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').then(r => r.update()).catch(() => {}));
+  // a new version took over while this page was open: reload once so the new files are used
+  const hadController = !!navigator.serviceWorker.controller; // first visit: nothing old to replace
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloaded || !hadController) return; reloaded = true; location.reload(); });
 }
 
 const configured = !!(CFG.supabaseUrl && CFG.supabaseAnonKey && !/YOUR_|여기에/.test(CFG.supabaseUrl + CFG.supabaseAnonKey));
