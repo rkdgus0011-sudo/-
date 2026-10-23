@@ -1047,19 +1047,19 @@ function vSettings() {
       ${lookCard()}
       <section class="card">
         <div class="card-h"><h2 class="card-t">카테고리</h2><div class="seg" role="group" aria-label="카테고리 구분"><button type="button" id="sk-out" data-act="set-kind" data-kind="out" aria-pressed="${kind === 'out'}">지출</button><button type="button" id="sk-in" data-act="set-kind" data-kind="in" aria-pressed="${kind === 'in'}">수입</button></div></div>
-        <div class="set-list">${cats.map(c => `<div class="set-row">
+        <div class="set-list" data-list="cat">${cats.map(c => `<div class="set-row" data-id="${esc(c.id)}"><button class="drag-h" type="button" id="dh-cat-${esc(c.id)}" data-drag="cat" aria-label="‘${esc(c.name)}’ 순서 옮기기 (끌거나 위·아래 화살표 키)" title="끌어서 순서 바꾸기" ${ro}>${icon('grip')}</button>
           <button class="input emoji emoji-btn" type="button" id="ce-${esc(c.id)}" data-act="cat-icon" data-id="${esc(c.id)}" aria-label="${esc(c.name)} 아이콘 바꾸기"${ccStyle(c)} ${ro}>${esc(c.emoji)}</button>
           <input class="input" id="cn-${esc(c.id)}" data-cat="${esc(c.id)}" data-field="name" value="${esc(c.name)}" aria-label="카테고리 이름" maxlength="20" autocomplete="off" ${ro}>
           <button class="icon-btn" type="button" data-act="del-cat" data-id="${esc(c.id)}" aria-label="${esc(c.name)} 삭제" title="${used[c.id] ? `기록 ${used[c.id]}건에 쓰였어요` : '삭제'}" ${ro}>${icon('trash')}</button></div>`).join('')}</div>
         <button class="btn btn-soft btn-sm set-add" type="button" data-act="add-cat" ${ro}>${icon('plus')}카테고리 추가</button>
-        <p class="set-note" style="margin-top:12px">아이콘 칸에는 이모지를 하나 넣어 주세요. 지운 카테고리의 기록은 ‘미분류’로 보여요.</p>
+        <p class="set-note" style="margin-top:12px">아이콘을 누르면 아이콘과 색을 고를 수 있어요. 왼쪽 손잡이를 끌면 순서가 바뀌어요. 지운 카테고리의 기록은 ‘미분류’로 보여요.</p>
       </section>
     </div><div class="col">
       <section class="card">
         <div class="card-h"><h2 class="card-t">결제수단</h2></div>
-        <div class="set-list">${methods.map(m => `<div class="set-row m"><input class="input" id="mn-${esc(m.id)}" data-method="${esc(m.id)}" value="${esc(m.name)}" aria-label="결제수단 이름" maxlength="20" autocomplete="off" ${ro}><button class="icon-btn" type="button" data-act="del-method" data-id="${esc(m.id)}" aria-label="${esc(m.name)} 삭제" ${ro}>${icon('trash')}</button></div>`).join('') || '<p class="set-note">결제수단이 없어요.</p>'}</div>
+        <div class="set-list" data-list="method">${methods.map(m => `<div class="set-row m" data-id="${esc(m.id)}"><button class="drag-h" type="button" id="dh-method-${esc(m.id)}" data-drag="method" aria-label="‘${esc(m.name)}’ 순서 옮기기 (끌거나 위·아래 화살표 키)" title="끌어서 순서 바꾸기" ${ro}>${icon('grip')}</button><input class="input" id="mn-${esc(m.id)}" data-method="${esc(m.id)}" value="${esc(m.name)}" aria-label="결제수단 이름" maxlength="20" autocomplete="off" ${ro}><button class="icon-btn" type="button" data-act="del-method" data-id="${esc(m.id)}" aria-label="${esc(m.name)} 삭제" ${ro}>${icon('trash')}</button></div>`).join('') || '<p class="set-note">결제수단이 없어요.</p>'}</div>
         <button class="btn btn-soft btn-sm set-add" type="button" data-act="add-method" ${ro}>${icon('plus')}결제수단 추가</button>
-        <p class="set-note" style="margin-top:12px">‘신한 체크’, ‘카카오페이’처럼 실제로 쓰는 이름으로 바꿔 두면 결제수단별 지출을 보기 좋아요.</p>
+        <p class="set-note" style="margin-top:12px">‘신한 체크’, ‘카카오페이’처럼 실제로 쓰는 이름으로 바꿔 두면 결제수단별 지출을 보기 좋아요. 왼쪽 손잡이를 끌면 순서가 바뀌고 기록 화면에도 그 순서로 보여요.</p>
       </section>
       ${accountCard()}
     </div></div>`;
@@ -3670,6 +3670,74 @@ function saveCatSheet() {
   closeSheet();
   toast('카테고리를 고쳤어요');
 }
+
+
+/* ================= 설정 목록 순서 바꾸기 (끌기 · 화살표 키) ================= */
+function saveOrder(list, ids) {
+  const st = cfg();
+  if (list === 'method') {
+    const by = Object.fromEntries(st.methods.map(m => [m.id, m]));
+    const next = ids.map(id => by[id]).filter(Boolean);
+    if (next.length !== st.methods.length || next.every((m, i) => m === st.methods[i])) return false;
+    saveSettings({ ...st, methods: next });
+  } else {
+    const kind = S.setKind, own = st.cats.filter(c => c.kind === kind), by = Object.fromEntries(own.map(c => [c.id, c]));
+    const next = ids.map(id => by[id]).filter(Boolean);
+    if (next.length !== own.length || next.every((c, i) => c === own[i])) return false;
+    let i = 0;
+    saveSettings({ ...st, cats: st.cats.map(c => (c.kind === kind ? next[i++] : c)) });
+  }
+  return true;
+}
+const listIds = list => [...list.children].map(r => r.dataset && r.dataset.id).filter(Boolean);
+let drag = null;
+document.addEventListener('pointerdown', e => {
+  const h = e.target.closest && e.target.closest('.drag-h');
+  if (!h || h.disabled || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const row = h.closest('[data-id]'), list = row && row.parentElement;
+  if (!list || !list.dataset.list) return;
+  e.preventDefault();
+  drag = { h, row, list, y0: e.clientY, pid: e.pointerId, moved: false };
+  try { h.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  row.classList.add('dragging');
+});
+document.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.pid) return;
+  e.preventDefault();
+  const { row, list } = drag;
+  let dy = e.clientY - drag.y0;
+  if (Math.abs(dy) > 3) drag.moved = true;
+  row.style.transform = `translateY(${dy}px)`;
+  const r = row.getBoundingClientRect(), mid = r.top + r.height / 2;
+  const prev = row.previousElementSibling, next = row.nextElementSibling;
+  let swap = null;
+  if (next && next.dataset.id) { const q = next.getBoundingClientRect(); if (mid > q.top + q.height / 2) swap = () => list.insertBefore(next, row); }
+  if (!swap && prev && prev.dataset.id) { const q = prev.getBoundingClientRect(); if (mid < q.top + q.height / 2) swap = () => list.insertBefore(row, prev); }
+  if (swap) {
+    const before = row.offsetTop; swap(); const after = row.offsetTop;
+    drag.y0 += after - before; dy = e.clientY - drag.y0;
+    row.style.transform = `translateY(${dy}px)`;
+  }
+}, { passive: false });
+function endDrag(e) {
+  if (!drag || (e && e.pointerId !== drag.pid)) return;
+  const { row, list, moved } = drag;
+  drag = null;
+  row.classList.remove('dragging'); row.style.transform = '';
+  if (moved && saveOrder(list.dataset.list, listIds(list))) toast('순서를 바꿨어요');
+}
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', endDrag);
+document.addEventListener('keydown', e => {
+  const h = e.target.closest && e.target.closest('.drag-h');
+  if (!h || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  const row = h.closest('[data-id]'), list = row.parentElement, ids = listIds(list), i = ids.indexOf(row.dataset.id), j = i + (e.key === 'ArrowUp' ? -1 : 1);
+  if (j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  S.focusAfter = h.id;
+  if (saveOrder(list.dataset.list, ids)) toast(`${j + 1}번째로 옮겼어요`);
+});
 
 /* ================= toast ================= */
 let toastTimer = 0, toastUndo = null;
