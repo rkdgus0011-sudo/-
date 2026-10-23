@@ -111,7 +111,8 @@ const S = {
   nospend: {},                // 'YYYY-MM' -> { 'YYYY-MM-DD': true } (무지출로 체크한 날)
   credit: {}, creditDoc: false,
   memos: {}, memosDoc: false,
-  accts: {}, acctsDoc: false,   // 통장: acctId -> account | null   // 쓸 돈 메모: memoId -> memo | null
+  accts: {}, acctsDoc: false,
+  deco: {},                     // 꾸미기 사진: { wall: dataURL, mascot: dataURL }   // 통장: acctId -> account | null   // 쓸 돈 메모: memoId -> memo | null
   loaded: { months: false, meta: false },
   definitive: { months: false, meta: false },
   pending: 0, syncError: false, storeError: false,
@@ -129,8 +130,10 @@ function normSettings(st) {
   const cats = Array.isArray(s.cats) && s.cats.length ? s.cats.filter(c => c && c.id && (c.kind === 'in' || c.kind === 'out')).map(c => ({ id: c.id, name: c.name || '이름 없음', emoji: c.emoji || '🏷️', kind: c.kind })) : DEFAULT_CATS;
   const methods = Array.isArray(s.methods) ? s.methods.filter(m => m && m.id).map(m => ({ id: m.id, name: m.name || '이름 없음' })) : DEFAULT_METHODS;
   const b = s.budget && typeof s.budget === 'object' ? s.budget : {};
-  const theme = ['forest', 'ocean', 'sunset', 'lavender', 'blossom', 'graphite', 'hanji', 'citrus', 'sky', 'mintchoco', 'night', 'cocoa', 'wine', 'neon'].includes(s.theme) ? s.theme : 'forest';
-  return { cats, methods, budget: { total: +b.total > 0 ? +b.total : 0, cats: { ...(b.cats || {}) } }, budgetEx: !!s.budgetEx, autoSubs: s.autoSubs !== false, theme };
+  const theme = ['forest', 'ocean', 'sunset', 'lavender', 'blossom', 'graphite', 'hanji', 'citrus', 'sky', 'mintchoco', 'night', 'cocoa', 'wine', 'neon', 'custom'].includes(s.theme) ? s.theme : 'forest';
+  const out = { cats, methods, budget: { total: +b.total > 0 ? +b.total : 0, cats: { ...(b.cats || {}) } }, budgetEx: !!s.budgetEx, autoSubs: s.autoSubs !== false, theme };
+  if (s.look && typeof s.look === 'object') out.look = { ...s.look };
+  return out;
 }
 const cfg = () => S.settings || normSettings(null);
 const catsOf = kind => cfg().cats.filter(c => c.kind === kind);
@@ -423,6 +426,13 @@ function startLive(db) {
     if (!snap.metadata || !snap.metadata.fromCache) S.definitive.meta = true;
     onData();
   }, onStoreError);
+  db.collection('deco').onSnapshot(snap => {
+    const d = {};
+    for (const doc of snap.docs) { const x = doc.data() || {}; if (x.img) d[doc.id] = x.img; }
+    const changed = JSON.stringify(Object.keys(d).map(k => [k, d[k].length])) !== JSON.stringify(Object.keys(S.deco).filter(k => S.deco[k]).map(k => [k, S.deco[k].length]));
+    S.deco = d;
+    if (changed) { applyLook(curLook()); scheduleRender(); }
+  }, () => {});
 }
 async function boot() {
   applyTheme(prefs.theme);
@@ -1034,7 +1044,7 @@ function vSettings() {
   const ro = S.mode === 'denied' ? 'disabled' : '';
   return `<div class="view-h"><h1 class="view-title">설정</h1></div>
     <div class="cols"><div class="col">
-      ${themeCard()}
+      ${lookCard()}
       <section class="card">
         <div class="card-h"><h2 class="card-t">카테고리</h2><div class="seg" role="group" aria-label="카테고리 구분"><button type="button" id="sk-out" data-act="set-kind" data-kind="out" aria-pressed="${kind === 'out'}">지출</button><button type="button" id="sk-in" data-act="set-kind" data-kind="in" aria-pressed="${kind === 'in'}">수입</button></div></div>
         <div class="set-list">${cats.map(c => `<div class="set-row">
@@ -1207,6 +1217,7 @@ function saveTx() {
   savePrefs();
   const wasEdit = !!f.id;
   closeSheet();
+  if (!wasEdit) mascotCheer();
   if (f.memoId) { markMemoDone(f.memoId, id, tx.amount, tx.date); toast('기록했어요 · 메모는 ‘썼어요’로 정리했어요'); return; }
   const mm = !wasEdit && tx.kind === 'out' && !f.newId ? matchMemo(tx) : null;
   if (mm) { toast(`메모해 둔 ‘${mm.name}’${josa(mm.name, '을/를').slice(-1)} 산 건가요?`, { undo: () => { markMemoDone(mm.id, id, tx.amount, tx.date); toast('메모를 ‘썼어요’로 정리했어요'); }, label: '맞아요', ms: 9000 }); return; }
@@ -1727,12 +1738,13 @@ const THEMES = [
   { id: 'neon', name: '네온', mode: 'dark', bg: '#0C0A18', surface: '#151226', accent: '#34E0F0', ink: '#EEEAFF' },
 ];
 function applyTheme(id) {
-  const ok = THEMES.some(x => x.id === id) ? id : 'forest';
+  const ok = id === 'custom' || THEMES.some(x => x.id === id) ? id : 'forest';
   if (ok === 'forest') document.documentElement.removeAttribute('data-pal');
   else document.documentElement.setAttribute('data-pal', ok);
   const th = THEMES.find(x => x.id === ok);
-  document.querySelectorAll('meta[name="theme-color"]').forEach(m => { if (m.dataset.orig == null) m.dataset.orig = m.content; m.content = th.mode === 'auto' ? m.dataset.orig : th.bg; });
+  if (th) document.querySelectorAll('meta[name="theme-color"]').forEach(m => { if (m.dataset.orig == null) m.dataset.orig = m.content; m.content = th.mode === 'auto' ? m.dataset.orig : th.bg; });
   if (prefs.theme !== ok) { prefs.theme = ok; savePrefs(); }
+  applyLook(curLook());
 }
 function themeOpt(x, cur) {
   return `<button class="theme-opt" type="button" role="radio" id="th-${x.id}" data-act="theme" data-id="${x.id}" aria-checked="${cur === x.id}"><span class="theme-prev" aria-hidden="true" style="background:${x.bg}"><i style="background:${x.surface}"><b style="background:${x.accent}"></b><s style="background:${x.ink}"></s></i>${x.dk ? `<span class="theme-dk" style="background:${x.dk[0]}"><i style="background:${x.dk[1]}"><b style="background:${x.dk[2]}"></b><s style="background:#ECF1EE"></s></i></span>` : ''}</span><span class="theme-n">${x.name}</span></button>`;
@@ -1764,7 +1776,7 @@ async function loadAccount() {
 }
 function backupData() {
   const settings = clone(cfg());
-  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), goals: clone(S.goals), credit: clone(S.credit), memos: clone(S.memos), accounts: clone(S.accts), nospend: clone(S.nospend), months: clone(S.months) };
+  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), goals: clone(S.goals), credit: clone(S.credit), memos: clone(S.memos), accounts: clone(S.accts), deco: clone(S.deco), nospend: clone(S.nospend), months: clone(S.months) };
 }
 function csvData() {
   const q = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -1853,6 +1865,7 @@ function applyRestore() {
   if (Object.keys(memoP).length) writeMemos(memoP);
   const acctP = { ...(b.accounts || {}) }; for (const k in S.accts) if (!(k in acctP)) acctP[k] = null;
   if (Object.keys(acctP).length) writeAccts(acctP);
+  for (const k of ['wall', 'mascot']) if (b.deco && typeof b.deco[k] === 'string' && b.deco[k].startsWith('data:image/') && b.deco[k] !== S.deco[k]) writeDeco(k, b.deco[k]);
   for (const ym in (b.nospend || {})) for (const d in b.nospend[ym]) if (b.nospend[ym][d]) writeNoSpend(d, true);
   if (b.settings) saveSettings(b.settings);
   toast('백업으로 되살렸어요');
@@ -3184,6 +3197,285 @@ function moveFields(f) {
     <p class="amt-hint">통장끼리 옮긴 돈이에요. 지출·수입 통계에는 넣지 않고 두 통장 잔액만 바꿔요. 지역화폐 충전도 여기에 적어요.</p>`;
 }
 
+/* ================= 꾸미기: 직접 만드는 색 · 배경 · 캐릭터 · 글꼴 ================= */
+const FONTS = [
+  { id: 'plex', name: '기본', note: 'IBM Plex Sans KR', fam: 'IBM Plex Sans KR', q: '' },
+  { id: 'noto', name: '본고딕', note: '깔끔한 고딕', fam: 'Noto Sans KR', q: 'Noto+Sans+KR:wght@400;500;700' },
+  { id: 'nanum', name: '나눔고딕', note: '익숙한 고딕', fam: 'Nanum Gothic', q: 'Nanum+Gothic:wght@400;700;800' },
+  { id: 'dodum', name: '고운돋움', note: '부드러운 고딕', fam: 'Gowun Dodum', q: 'Gowun+Dodum' },
+  { id: 'batang', name: '고운바탕', note: '단정한 명조', fam: 'Gowun Batang', q: 'Gowun+Batang:wght@400;700' },
+  { id: 'jua', name: '주아', note: '동글동글 귀여운', fam: 'Jua', q: 'Jua' },
+  { id: 'gaegu', name: '개구', note: '손글씨', fam: 'Gaegu', q: 'Gaegu:wght@400;700' },
+  { id: 'pen', name: '나눔손글씨 펜', note: '펜 손글씨', fam: 'Nanum Pen Script', q: 'Nanum+Pen+Script' },
+  { id: 'dohyeon', name: '도현', note: '굵은 제목체', fam: 'Do Hyeon', q: '' },
+];
+const GRADS = [
+  { id: 'dawn', name: '새벽', c: ['#A1C4FD', '#C2E9FB'] }, { id: 'peach', name: '복숭아', c: ['#FFB199', '#FFE29F'] },
+  { id: 'lilac', name: '라일락', c: ['#C3B1E1', '#FBC2EB'] }, { id: 'mint', name: '민트', c: ['#84FAB0', '#8FD3F4'] },
+  { id: 'sunset', name: '노을', c: ['#FF9A8B', '#FECF71'] }, { id: 'ocean', name: '바다', c: ['#4FACFE', '#43E97B'] },
+  { id: 'cotton', name: '솜사탕', c: ['#FBC2EB', '#A6C1EE'] }, { id: 'aurora', name: '오로라', c: ['#7F7FD5', '#91EAE4'] },
+];
+const ACCENTS = ['#0C7F57', '#0B6E8A', '#2B4FCF', '#6544C4', '#B4245F', '#D2363D', '#B9461A', '#B0500E', '#8A6A00', '#4D6B1F', '#6A3E2A', '#374151'];
+const LOOK_DEF = { accent: '#6544C4', mode: 'auto', bg: 'none', grad: 'dawn', g1: '#A1C4FD', g2: '#FBC2EB', angle: 160, power: 2, blur: 1, dim: 2, glass: false, char: 'none', charSize: 'm', charPos: 'r', talk: true, font: 'plex', numBase: true, fs: 'm', radius: 'md' };
+const FS = { s: 0.93, m: 1, l: 1.08, xl: 1.16 }, RAD = { sq: 10, md: 20, rd: 28 };
+const isHex = v => /^#[0-9a-fA-F]{6}$/.test(String(v || ''));
+function normLook(l) {
+  const x = l && typeof l === 'object' ? l : {}, d = LOOK_DEF, pick = (v, ok, def) => (ok.includes(v) ? v : def);
+  return {
+    accent: isHex(x.accent) ? x.accent : d.accent, mode: pick(x.mode, ['auto', 'light', 'dark'], d.mode),
+    bg: pick(x.bg, ['none', 'grad', 'photo'], d.bg), grad: pick(x.grad, [...GRADS.map(g => g.id), 'custom'], d.grad),
+    g1: isHex(x.g1) ? x.g1 : d.g1, g2: isHex(x.g2) ? x.g2 : d.g2, angle: pick(+x.angle, [180, 160, 90], d.angle),
+    power: pick(+x.power, [1, 2, 3], d.power), blur: pick(+x.blur, [0, 1, 2], d.blur), dim: pick(+x.dim, [1, 2, 3], d.dim), glass: !!x.glass,
+    char: pick(x.char, ['none', 'coin', 'mine'], d.char), charSize: pick(x.charSize, ['s', 'm', 'l'], d.charSize), charPos: pick(x.charPos, ['r', 'l'], d.charPos), talk: x.talk !== false,
+    font: pick(x.font, FONTS.map(f => f.id), d.font), numBase: x.numBase !== false, fs: pick(x.fs, Object.keys(FS), d.fs), radius: pick(x.radius, Object.keys(RAD), d.radius),
+  };
+}
+const look = () => normLook(cfg().look);
+const curLook = () => (S.settings ? look() : normLook(prefs.look));
+function saveLook(patch) {
+  const next = { ...look(), ...patch };
+  saveSettings({ ...cfg(), look: next });
+  applyLook(next);
+}
+
+/* --- colour maths for the made-by-me theme --- */
+const hex2rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const rgb2hex = c => '#' + c.map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('').toUpperCase();
+const mixHex = (a, b, t) => { const x = hex2rgb(a), y = hex2rgb(b); return rgb2hex(x.map((v, i) => v + (y[i] - v) * t)); };
+const relLum = h => { const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; const [r, g, b] = hex2rgb(h); return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+const contrast = (a, b) => { const x = relLum(a), y = relLum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+const darkMQ = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : { matches: false };
+function customPalette(accent, dark) {
+  const N = dark
+    ? { bg: '#0F1312', surface: '#171C1A', s2: '#1D2321', s3: '#262D2A', ink: '#ECF1EE', ink2: '#B3BEB9', muted: '#8E9993', line: '#29312E', ls: '#3B4542', inc: '#6AA3FF', out: '#FF6E73', warn: '#F0A92A', warnInk: '#F3B54A', crit: '#FF6B6B' }
+    : { bg: '#F3F5F4', surface: '#FFFFFF', s2: '#F6F7F7', s3: '#E9EDEB', ink: '#17201C', ink2: '#4A5651', muted: '#5F6A65', line: '#E2E8E5', ls: '#C9D2CD', inc: '#2563D9', out: '#D2363D', warn: '#E39B0B', warnInk: '#9A5E00', crit: '#D03B3B' };
+  const tint = (c, t) => mixHex(c, accent, t);
+  const surface = dark ? tint(N.surface, 0.04) : N.surface;
+  let a = accent, n = 0;
+  while (contrast(a, surface) < 4.5 && n++ < 40) a = mixHex(a, dark ? '#FFFFFF' : '#000000', 0.07);
+  const ai = contrast('#FFFFFF', a) >= contrast('#0B0F0D', a) ? '#FFFFFF' : '#0B0F0D';
+  const vars = {
+    '--bg': tint(N.bg, dark ? 0.06 : 0.07), '--surface': surface, '--surface-2': tint(N.s2, 0.05), '--surface-3': tint(N.s3, 0.07), '--paper': dark ? tint(N.s2, 0.05) : '#FCFDFB',
+    '--ink': N.ink, '--ink-2': N.ink2, '--muted': N.muted, '--line': tint(N.line, 0.06), '--line-strong': tint(N.ls, 0.06),
+    '--accent': a, '--accent-ink': ai, '--accent-soft': mixHex(surface, a, dark ? 0.16 : 0.12), '--accent-track': mixHex(surface, a, dark ? 0.28 : 0.22),
+    '--in': N.inc, '--out': N.out, '--warn': N.warn, '--warn-ink': N.warnInk, '--crit': N.crit,
+    '--toast-bg': N.ink, '--toast-fg': N.bg, '--toast-act': dark ? mixHex(a, '#000000', 0.35) : mixHex(a, '#FFFFFF', 0.45),
+    '--scrim': dark ? 'rgba(0, 0, 0, .6)' : 'rgba(12, 18, 15, .42)',
+    '--shadow': dark ? '0 0 0 1px rgba(255, 255, 255, .04)' : '0 1px 2px rgba(23, 32, 28, .04), 0 6px 20px rgba(23, 32, 28, .05)',
+    '--shadow-lg': dark ? '0 18px 50px rgba(0, 0, 0, .55)' : '0 18px 50px rgba(23, 32, 28, .18)',
+  };
+  return { vars, adjusted: a.toUpperCase() !== accent.toUpperCase(), accent: a };
+}
+const CUSTOM_KEYS = Object.keys(customPalette('#6544C4', false).vars);
+
+/* --- applying everything --- */
+const loadedFonts = new Set(['plex', 'dohyeon']);
+function loadFonts(list) {
+  const need = list.filter(f => f.q && !loadedFonts.has(f.id));
+  if (!need.length) return;
+  need.forEach(f => loadedFonts.add(f.id));
+  const l = document.createElement('link');
+  l.rel = 'stylesheet';
+  l.href = `https://fonts.googleapis.com/css2?${need.map(f => 'family=' + f.q).join('&')}&display=swap`;
+  document.head.appendChild(l);
+}
+function applyLook(src) {
+  const l = normLook(src), R = document.documentElement;
+  try { const keep = { ...l }; if (JSON.stringify(prefs.look) !== JSON.stringify(keep)) { prefs.look = keep; savePrefs(); } } catch (e) { /* ignore */ }
+  // made-by-me colours
+  for (const k of CUSTOM_KEYS) R.style.removeProperty(k);
+  R.style.removeProperty('color-scheme');
+  if (R.getAttribute('data-pal') === 'custom') {
+    const dark = l.mode === 'dark' || (l.mode === 'auto' && darkMQ.matches);
+    const p = customPalette(l.accent, dark);
+    for (const k in p.vars) R.style.setProperty(k, p.vars[k]);
+    R.style.setProperty('color-scheme', dark ? 'dark' : 'light');
+    document.querySelectorAll('meta[name="theme-color"]').forEach(m => { if (m.dataset.orig == null) m.dataset.orig = m.content; m.content = p.vars['--bg']; });
+  }
+  // fonts, size, corners
+  const f = FONTS.find(x => x.id === l.font) || FONTS[0];
+  loadFonts([f]);
+  if (f.id === 'plex') R.style.removeProperty('--font-ui');
+  else R.style.setProperty('--font-ui', `"${f.fam}", "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif`);
+  R.style.setProperty('--font-num', l.numBase ? '"IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif' : 'var(--font-ui)');
+  R.setAttribute('data-fs', l.fs);
+  R.style.zoom = l.fs === 'm' ? '' : String(FS[l.fs]);
+  R.style.setProperty('--radius', RAD[l.radius] + 'px');
+  // background
+  const wall = S.deco && S.deco.wall, on = l.bg === 'grad' || (l.bg === 'photo' && !!wall);
+  let el = document.getElementById('decoBg');
+  if (!on) { if (el) el.remove(); R.removeAttribute('data-deco'); }
+  else {
+    if (!el) { el = document.createElement('div'); el.id = 'decoBg'; el.setAttribute('aria-hidden', 'true'); document.body.prepend(el); }
+    R.setAttribute('data-deco', l.bg);
+    if (l.bg === 'grad') {
+      const g = l.grad === 'custom' ? [l.g1, l.g2] : (GRADS.find(x => x.id === l.grad) || GRADS[0]).c, p = [0, 22, 38, 58][l.power];
+      el.style.backgroundImage = `linear-gradient(${l.angle}deg, color-mix(in srgb, ${g[0]} ${p}%, var(--bg)), color-mix(in srgb, ${g[1]} ${p}%, var(--bg)))`;
+      el.style.filter = ''; el.removeAttribute('data-dim');
+    } else {
+      el.style.backgroundImage = `url("${wall}")`;
+      el.style.filter = l.blur ? `blur(${[0, 6, 14][l.blur]}px)` : '';
+      el.setAttribute('data-dim', String(l.dim));
+    }
+  }
+  if (on && l.glass) R.setAttribute('data-glass', '1'); else R.removeAttribute('data-glass');
+  renderMascot(l);
+}
+if (darkMQ.addEventListener) darkMQ.addEventListener('change', () => { if (document.documentElement.getAttribute('data-pal') === 'custom') applyLook(curLook()); });
+
+/* --- 캐릭터 --- */
+// 꼬박이: 새싹이 난 동전 캐릭터 (이 가계부를 위해 새로 그린 그림)
+const COIN_SVG = `<svg viewBox="0 0 120 128" aria-hidden="true"><path d="M60 22c-2-10 3-17 13-19-1 9-5 15-13 19z" fill="#5DBB63"/><path d="M60 22c-6-8-14-9-21-5 5 7 12 9 21 5z" fill="#7ED07F"/><path d="M60 21v8" stroke="#3E8E45" stroke-width="3" stroke-linecap="round"/><ellipse cx="60" cy="122" rx="30" ry="4" fill="#000" opacity=".12"/><circle cx="60" cy="74" r="46" fill="#F2B632"/><circle cx="60" cy="74" r="38" fill="#FFCF4D"/><circle cx="60" cy="74" r="38" fill="none" stroke="#E5A520" stroke-width="2" stroke-dasharray="3 5"/><ellipse cx="44" cy="70" rx="5" ry="6.5" fill="#3A2A12"/><ellipse cx="76" cy="70" rx="5" ry="6.5" fill="#3A2A12"/><circle cx="46" cy="67.5" r="1.8" fill="#fff"/><circle cx="78" cy="67.5" r="1.8" fill="#fff"/><ellipse cx="36" cy="84" rx="6" ry="3.5" fill="#FF8A65" opacity=".55"/><ellipse cx="84" cy="84" rx="6" ry="3.5" fill="#FF8A65" opacity=".55"/><path d="M51 85c5 6 13 6 18 0" fill="none" stroke="#3A2A12" stroke-width="3" stroke-linecap="round"/></svg>`;
+function renderMascot(l) {
+  let el = document.getElementById('mascot');
+  const mine = S.deco && S.deco.mascot;
+  const src = l.char === 'coin' ? 'coin' : l.char === 'mine' && mine ? mine : '';
+  if (!src || !document.getElementById('view')) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('button');
+    el.id = 'mascot'; el.type = 'button'; el.setAttribute('data-act', 'mascot');
+    document.body.appendChild(el);
+  }
+  el.setAttribute('aria-label', l.talk ? '캐릭터 — 누르면 한마디 해요' : '캐릭터');
+  el.dataset.size = l.charSize; el.dataset.pos = l.charPos;
+  const key = src === 'coin' ? 'coin' : 'mine:' + src.length;
+  if (el.dataset.src !== key) {
+    el.dataset.src = key;
+    el.innerHTML = `<span class="m-pic">${src === 'coin' ? COIN_SVG : `<img src="${src}" alt="">`}</span><span class="bubble" role="status" hidden></span>`;
+  }
+}
+let mascotIdx = 0, bubbleTimer = 0;
+function mascotLines() {
+  const t = todayStr(), ym = ymOf(t), list = txsOf(ym), out = totals(list).out, bs = budgetSummary(ym, out), L = [];
+  if (bs && bs.left > 0) L.push(`오늘은 ${won(Math.floor(bs.left / (daysIn(ym) - +t.slice(8) + 1)))}까지 써도 괜찮아요!`);
+  if (bs && bs.left <= 0) L.push('이번 달 예산을 넘었어요. 내일은 무지출 도전 어때요?');
+  const h = habitStats();
+  if (h.streak >= 2) L.push(`${h.streak}일째 꼬박꼬박 기록 중이에요. 대단해요!`);
+  if (!h.todayAny) L.push('오늘 쓴 돈, 잊기 전에 적어 볼까요?');
+  else if (!h.todayOut) L.push('오늘은 아직 쓴 돈이 없어요. 이대로 무지출?');
+  const up = plannedIn(addDays(t, 1), addDays(t, 3))[0];
+  if (up) L.push(`${ddayText(up.date)} ‘${up.name}’ ${won(up.amount)}이 나가요.`);
+  const m = openMemos().filter(x => x.date && x.date >= t).sort(memoSort)[0];
+  if (m) L.push(`메모해 둔 ‘${m.name}’, ${ddayText(m.date)}예요.`);
+  L.push('적는 만큼 돈이 보여요. 오늘도 꼬박꼬박!');
+  return L;
+}
+function mascotTalk() {
+  const el = document.getElementById('mascot');
+  if (!el) return;
+  el.classList.remove('hop'); void el.offsetWidth; el.classList.add('hop');
+  if (!look().talk) return;
+  const b = el.querySelector('.bubble'), L = mascotLines();
+  b.textContent = L[mascotIdx++ % L.length];
+  b.hidden = false;
+  clearTimeout(bubbleTimer);
+  bubbleTimer = setTimeout(() => { b.hidden = true; }, 4200);
+}
+function mascotCheer() { const el = document.getElementById('mascot'); if (el) { el.classList.remove('hop'); void el.offsetWidth; el.classList.add('hop'); } }
+
+/* --- 사진 넣기: 브라우저에서 줄여서 저장해요 --- */
+async function shrinkImage(file, kind) {
+  if (!file || !/^image\//.test(file.type)) throw new Error('사진(이미지) 파일만 넣을 수 있어요.');
+  if (file.size > 25e6) throw new Error('25MB보다 작은 사진을 골라 주세요.');
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('사진을 읽지 못했어요. 다른 사진으로 해 볼까요?')); i.src = url; });
+    const W = img.naturalWidth || 400, H = img.naturalHeight || 400;
+    let scale = Math.min(1, (kind === 'wall' ? 1400 : 360) / Math.max(W, H));
+    for (let i = 0; i < 6; i++) {
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(W * scale)); c.height = Math.max(1, Math.round(H * scale));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      let data = kind === 'wall' ? c.toDataURL('image/jpeg', 0.8) : c.toDataURL('image/webp', 0.9);
+      if (!data.startsWith('data:image/webp') && kind !== 'wall') data = c.toDataURL('image/png');
+      if (data.length < 600000) return data;
+      scale *= 0.75;
+    }
+    throw new Error('사진이 너무 커요. 다른 사진으로 해 볼까요?');
+  } finally { URL.revokeObjectURL(url); }
+}
+function writeDeco(kind, img) {
+  S.deco = { ...S.deco, [kind]: img };
+  applyLook(look());
+  scheduleRender();
+  if (!S.db) return Promise.resolve();
+  const body = { img, at: Date.now() };
+  return track(enqueue('deco/' + kind, () => retry(() => S.db.doc('deco/' + kind).set(body))));
+}
+async function pickDeco(kind, file) {
+  try {
+    toast('사진을 줄이는 중이에요…');
+    const data = await shrinkImage(file, kind);
+    await writeDeco(kind, data);
+    if (kind === 'wall') saveLook({ bg: 'photo' }); else saveLook({ char: 'mine' });
+    toast(kind === 'wall' ? '배경 사진을 넣었어요' : '캐릭터를 넣었어요');
+  } catch (e) { toast(e && e.message ? e.message : '사진을 넣지 못했어요'); }
+}
+
+/* --- 설정의 꾸미기 카드 --- */
+const segBtns = (act, cur, opts) => `<div class="seg" role="group" style="width:100%">${opts.map(([v, n]) => `<button type="button" data-act="${act}" data-v="${v}" aria-pressed="${String(cur) === String(v)}">${n}</button>`).join('')}</div>`;
+function lookCard() {
+  const tab = S.lookTab || 'color', l = look(), cur = cfg().theme;
+  const tabs = `<div class="seg look-tabs" role="tablist" aria-label="꾸미기">${[['color', '색'], ['bg', '배경'], ['char', '캐릭터'], ['font', '글꼴·크기']].map(([v, n]) => `<button type="button" role="tab" id="lt-${v}" data-act="look-tab" data-v="${v}" aria-pressed="${tab === v}" aria-selected="${tab === v}">${n}</button>`).join('')}</div>`;
+  let body = '';
+  if (tab === 'color') {
+    const grp = m => THEMES.filter(x => m.includes(x.mode)).map(x => themeOpt(x, cur)).join('');
+    const cp = customPalette(l.accent, l.mode === 'dark' || (l.mode === 'auto' && darkMQ.matches));
+    const mine = `<button class="theme-opt" type="button" role="radio" id="th-custom" data-act="theme" data-id="custom" aria-checked="${cur === 'custom'}"><span class="theme-prev" aria-hidden="true" style="background:${cp.vars['--bg']}"><i style="background:${cp.vars['--surface']}"><b style="background:${cp.vars['--accent']}"></b><s style="background:${cp.vars['--ink']}"></s></i></span><span class="theme-n">직접 만들기</span></button>`;
+    body = `<div role="radiogroup" aria-label="색상 테마">
+      <p class="theme-gt">기기 설정 따라가기 <span>밝은 화면·어두운 화면이 기기 설정에 맞춰 바뀌어요</span></p>
+      <div class="themes">${grp(['auto'])}</div>
+      <p class="theme-gt">늘 같은 색 <span>기기 설정과 상관없이 이 색 그대로 보여요</span></p>
+      <div class="themes">${grp(['light', 'dark'])}</div>
+      <p class="theme-gt">나만의 색 <span>좋아하는 색 하나만 고르면 나머지는 맞춰 드려요</span></p>
+      <div class="themes">${mine}</div></div>
+      ${cur === 'custom' ? `<div class="look-box">
+        <span class="lab">포인트 색</span>
+        <div class="swatches">${ACCENTS.map(c => `<button type="button" class="sw" data-act="lk-accent" data-v="${c}" style="background:${c}" aria-label="${c}" aria-pressed="${l.accent.toUpperCase() === c}"></button>`).join('')}<label class="sw sw-pick" title="직접 고르기"><input type="color" id="lk-accent" value="${l.accent}" aria-label="색 직접 고르기"><span aria-hidden="true">+</span></label></div>
+        ${cp.adjusted ? `<p class="amt-hint">글자가 잘 보이도록 고른 색을 조금 ${l.mode === 'dark' ? '밝게' : '진하게'} 맞췄어요.</p>` : ''}
+        <span class="lab">바탕</span>${segBtns('lk-mode', l.mode, [['auto', '기기 따라'], ['light', '늘 밝게'], ['dark', '늘 어둡게']])}
+      </div>` : ''}`;
+  } else if (tab === 'bg') {
+    const wall = S.deco && S.deco.wall;
+    const gradTiles = GRADS.map(g => `<button type="button" class="grad-opt" data-act="lk-grad" data-v="${g.id}" aria-pressed="${l.bg === 'grad' && l.grad === g.id}"><span style="background:linear-gradient(135deg, ${g.c[0]}, ${g.c[1]})"></span>${g.name}</button>`).join('')
+      + `<button type="button" class="grad-opt" data-act="lk-grad" data-v="custom" aria-pressed="${l.bg === 'grad' && l.grad === 'custom'}"><span style="background:linear-gradient(135deg, ${l.g1}, ${l.g2})"></span>직접</button>`;
+    body = `${segBtns('lk-bg', l.bg, [['none', '기본'], ['grad', '그라데이션'], ['photo', '사진']])}
+      ${l.bg !== 'photo' ? `<div class="look-box"><div class="grads">${gradTiles}</div>
+        ${l.grad === 'custom' ? `<div class="field-row"><label class="field"><span class="lab">시작 색</span><input type="color" class="input color-in" id="lk-g1" value="${l.g1}"></label><label class="field"><span class="lab">끝 색</span><input type="color" class="input color-in" id="lk-g2" value="${l.g2}"></label></div>` : ''}
+        ${l.bg === 'grad' ? `<span class="lab">방향</span>${segBtns('lk-angle', l.angle, [['180', '위→아래'], ['160', '비스듬히'], ['90', '왼쪽→오른쪽']])}
+        <span class="lab">진하기</span>${segBtns('lk-power', l.power, [['1', '은은하게'], ['2', '보통'], ['3', '진하게']])}` : '<p class="amt-hint">그라데이션을 하나 고르면 바로 적용돼요.</p>'}</div>` : ''}
+      ${l.bg === 'photo' ? `<div class="look-box">
+        ${wall ? `<div class="wall-prev" style="background-image:url('${wall}')"></div>` : '<p class="set-note">갤러리에서 사진을 고르면 화면 뒤에 깔아 드려요. 사진은 자동으로 작게 줄여서 내 계정에만 저장해요.</p>'}
+        <div class="habit-acts"><label class="btn btn-primary btn-sm file-btn">${icon('plus', 'sm')}${wall ? '사진 바꾸기' : '사진 고르기'}<input type="file" id="lk-wall" accept="image/*" hidden></label>${wall ? '<button class="btn btn-ghost btn-sm" type="button" data-act="lk-wall-del">사진 빼기</button>' : ''}</div>
+        ${wall ? `<span class="lab">흐리게</span>${segBtns('lk-blur', l.blur, [['0', '선명하게'], ['1', '살짝'], ['2', '많이']])}
+        <span class="lab">위에 덮는 색 <span class="muted" style="font-weight:400">(글자가 잘 보이게)</span></span>${segBtns('lk-dim', l.dim, [['1', '조금'], ['2', '보통'], ['3', '많이']])}` : ''}</div>` : ''}
+      ${l.bg !== 'none' ? `<div class="switch-row"><div><span class="card-t">카드 반투명하게</span><p>배경이 카드 뒤로 은은하게 비쳐요. 글자가 잘 안 보이면 꺼 주세요.</p></div><button class="switch" type="button" role="switch" aria-checked="${l.glass}" data-act="lk-glass" aria-label="카드 반투명하게"></button></div>` : ''}`;
+  } else if (tab === 'char') {
+    const mine = S.deco && S.deco.mascot;
+    body = `<div class="char-opts">
+        <button type="button" class="char-opt" data-act="lk-char" data-v="none" aria-pressed="${l.char === 'none'}"><span class="cp-none">없음</span></button>
+        <button type="button" class="char-opt" data-act="lk-char" data-v="coin" aria-pressed="${l.char === 'coin'}"><span class="cp-img">${COIN_SVG}</span>꼬박이</button>
+        <button type="button" class="char-opt" data-act="lk-char" data-v="mine" aria-pressed="${l.char === 'mine'}" ${mine ? '' : 'disabled'}><span class="cp-img">${mine ? `<img src="${mine}" alt="">` : ''}</span>내 그림</button>
+      </div>
+      <div class="habit-acts"><label class="btn btn-soft btn-sm file-btn">${icon('plus', 'sm')}${mine ? '내 그림 바꾸기' : '내 그림 넣기'}<input type="file" id="lk-mascot" accept="image/*" hidden></label>${mine ? '<button class="btn btn-ghost btn-sm" type="button" data-act="lk-mascot-del">내 그림 빼기</button>' : ''}</div>
+      <p class="amt-hint">배경이 투명한 PNG 그림이 가장 예뻐요. 직접 그린 그림이나 사진을 써 주세요. 다른 사람의 캐릭터를 공개된 곳에 쓰면 저작권 문제가 생길 수 있어요.</p>
+      ${l.char !== 'none' ? `<span class="lab">크기</span>${segBtns('lk-csize', l.charSize, [['s', '작게'], ['m', '보통'], ['l', '크게']])}
+      <span class="lab">자리</span>${segBtns('lk-cpos', l.charPos, [['r', '오른쪽 아래'], ['l', '왼쪽 아래']])}
+      <div class="switch-row"><div><span class="card-t">말 걸기</span><p>누르면 오늘 쓸 수 있는 돈, 다가오는 결제 같은 한마디를 해요.</p></div><button class="switch" type="button" role="switch" aria-checked="${l.talk}" data-act="lk-talk" aria-label="말 걸기"></button></div>` : ''}`;
+  } else {
+    loadFonts(FONTS);
+    body = `<div class="font-list" role="radiogroup" aria-label="글꼴">${FONTS.map(f => `<button type="button" class="font-opt" role="radio" data-act="lk-font" data-v="${f.id}" aria-checked="${l.font === f.id}" style="font-family:'${f.fam}', 'IBM Plex Sans KR', sans-serif"><span class="fo-n">${f.name}</span><span class="fo-s">꼬박꼬박 12,500원</span><small>${f.note}</small></button>`).join('')}</div>
+      <div class="switch-row"><div><span class="card-t">금액은 기본 글꼴로 보기</span><p>손글씨 글꼴은 숫자가 헷갈릴 수 있어요. 켜 두면 금액만 또렷한 기본 글꼴로 보여요.</p></div><button class="switch" type="button" role="switch" aria-checked="${l.numBase}" data-act="lk-num" aria-label="금액은 기본 글꼴로 보기"></button></div>
+      <span class="lab">글자 크기</span>${segBtns('lk-fs', l.fs, [['s', '작게'], ['m', '보통'], ['l', '크게'], ['xl', '아주 크게']])}
+      <span class="lab">카드 모서리</span>${segBtns('lk-radius', l.radius, [['sq', '각지게'], ['md', '보통'], ['rd', '둥글게']])}`;
+  }
+  return `<section class="card look-card">
+    <div class="card-h"><h2 class="card-t">꾸미기</h2><button class="card-link" type="button" data-act="lk-reset">처음 모습으로</button></div>
+    ${tabs}<div class="look-body">${body}</div>
+    <p class="set-note" style="margin-top:12px">고른 모습은 계정에 저장돼서 다른 기기에서도 똑같이 보여요.</p>
+  </section>`;
+}
+
 /* ================= toast ================= */
 let toastTimer = 0, toastUndo = null;
 function toast(msg, opts = {}) {
@@ -3333,7 +3625,29 @@ const ACT = {
   'l-qmode2': () => { const d = F; F = quickF(null, null, { name: d.name, principal: d.principal, day: d.day, method: d.method, kind: d.type === 'bullet' ? 'int' : 'amort' }); rerenderSheet(quickLoanSheet()); },
   'l-method': el => { F.method = el.dataset.id; for (const b of document.querySelectorAll('#sheet [data-act="l-method"]')) b.setAttribute('aria-pressed', String(b.dataset.id === F.method)); },
   'l-delete': () => deleteLoan(),
-  theme: el => { applyTheme(el.dataset.id); saveSettings({ ...cfg(), theme: el.dataset.id }); },
+  theme: el => { saveSettings({ ...cfg(), theme: el.dataset.id }); applyTheme(el.dataset.id); },
+  'look-tab': el => { S.lookTab = el.dataset.v; renderView(); },
+  'lk-accent': el => saveLook({ accent: el.dataset.v }),
+  'lk-mode': el => saveLook({ mode: el.dataset.v }),
+  'lk-bg': el => saveLook({ bg: el.dataset.v }),
+  'lk-grad': el => saveLook({ bg: 'grad', grad: el.dataset.v }),
+  'lk-angle': el => saveLook({ angle: +el.dataset.v }),
+  'lk-power': el => saveLook({ power: +el.dataset.v }),
+  'lk-blur': el => saveLook({ blur: +el.dataset.v }),
+  'lk-dim': el => saveLook({ dim: +el.dataset.v }),
+  'lk-glass': () => saveLook({ glass: !look().glass }),
+  'lk-char': el => saveLook({ char: el.dataset.v }),
+  'lk-csize': el => saveLook({ charSize: el.dataset.v }),
+  'lk-cpos': el => saveLook({ charPos: el.dataset.v }),
+  'lk-talk': () => saveLook({ talk: !look().talk }),
+  'lk-font': el => saveLook({ font: el.dataset.v }),
+  'lk-num': () => saveLook({ numBase: !look().numBase }),
+  'lk-fs': el => saveLook({ fs: el.dataset.v }),
+  'lk-radius': el => saveLook({ radius: el.dataset.v }),
+  'lk-reset': () => { saveSettings({ ...cfg(), theme: 'forest', look: { ...LOOK_DEF } }); applyTheme('forest'); toast('처음 모습으로 되돌렸어요'); },
+  'lk-wall-del': () => { writeDeco('wall', ''); saveLook({ bg: 'none' }); },
+  'lk-mascot-del': () => { writeDeco('mascot', ''); if (look().char === 'mine') saveLook({ char: 'none' }); },
+  mascot: () => mascotTalk(),
   'backup-json': () => saveFile(`꼬박꼬박가계부_백업_${todayStr()}.json`, JSON.stringify(backupData())),
   'backup-csv': () => saveFile(`꼬박꼬박가계부_내역_${todayStr()}.csv`, csvData()),
   'restore-pick': () => { const i = $('#restoreFile'); if (i) { i.value = ''; i.click(); } },
@@ -3393,6 +3707,7 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'flt-q') { S.filter.q = el.value; updateListResults(); return; }
+  if (el.id === 'lk-accent' && isHex(el.value)) { applyLook({ ...look(), accent: el.value }); return; } // live preview while dragging
   if (el.id === 'ai-q') { S.aiDraft = el.value; return; }
   if (el.id === 'f-amount' || el.id === 'm-amount' || el.id === 'a-bal' || el.id === 'x-bal' || el.id === 's-amount' || el.id === 'b-total' || el.id === 'l-principal' || el.id === 'q-principal' || el.id === 'q-pay' || el.id === 'q-int' || el.id === 'g-target' || el.id === 'g-monthly' || el.id === 'dep-amount' || el.id === 'su-income' || el.id === 'su-fixed' || (el.dataset && el.dataset.bcat)) { onMoneyInput(el); return; }
   if (F && F.mode === 'goal') {
@@ -3429,6 +3744,9 @@ document.addEventListener('change', e => {
   if (el.dataset && el.dataset.field && el.dataset.cat) { updateCat(el.dataset.cat, el.dataset.field, el.value); return; }
   if (el.dataset && el.dataset.method && el.id.startsWith('mn-')) { updateMethod(el.dataset.method, el.value); return; }
   if (el.id === 'restoreFile') { readRestore(el.files && el.files[0]); return; }
+  if (el.id === 'lk-wall' || el.id === 'lk-mascot') { const f = el.files && el.files[0]; el.value = ''; if (f) pickDeco(el.id === 'lk-wall' ? 'wall' : 'mascot', f); return; }
+  if (el.id === 'lk-accent' && isHex(el.value)) { saveLook({ accent: el.value.toUpperCase() }); return; }
+  if ((el.id === 'lk-g1' || el.id === 'lk-g2') && isHex(el.value)) { saveLook({ [el.id === 'lk-g1' ? 'g1' : 'g2']: el.value.toUpperCase() }); return; }
   if (!F) return;
   switch (el.id) {
     case 'f-memo': F.memo = el.value; learnFromMemo(); break;
