@@ -1,5 +1,5 @@
 /* 꼬박꼬박 가계부 · 오프라인에서도 화면이 열리도록 앱 파일을 보관해요 (데이터는 항상 서버에서 받아요). */
-const CACHE = 'ttb-shell-v19';
+const CACHE = 'ttb-shell-v21';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'platform.js', 'config.js', 'vendor/supabase.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
