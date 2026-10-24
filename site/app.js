@@ -31,7 +31,7 @@ const DEFAULT_METHODS = [
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const UNKNOWN_CAT = { id: '', name: '미분류', emoji: '🏷️', kind: 'out' };
 const BACKFILL_DAYS = 92; // auto-record never reaches further back than this
-const VIEW_NAMES = ['home', 'list', 'subs', 'accounts', 'goals', 'loans', 'credit', 'stats', 'budget', 'settings'];
+const VIEW_NAMES = ['home', 'room', 'list', 'subs', 'accounts', 'goals', 'loans', 'credit', 'stats', 'budget', 'settings'];
 
 /* ================= utils ================= */
 const $ = (s, r = document) => r.querySelector(s);
@@ -112,6 +112,7 @@ const S = {
   credit: {}, creditDoc: false,
   memos: {}, memosDoc: false,
   accts: {}, acctsDoc: false,
+  room: {}, roomDoc: false, roomSel: null, roomTab: 'floor', // 꼬박방: 소품·미션 (meta/room)
   deco: {},                     // 꾸미기 사진: { wall: dataURL, mascot: dataURL }   // 통장: acctId -> account | null   // 쓸 돈 메모: memoId -> memo | null
   loaded: { months: false, meta: false },
   definitive: { months: false, meta: false },
@@ -200,6 +201,8 @@ function makeTx(t) {
   if (kind === 'move') { o.from = t.from || ''; o.to = t.to || ''; } else if (t.acct) o.acct = t.acct;
   const note = String(t.note || '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, NOTE_MAX);
   if (note || typeof t.note === 'string') o.note = note; // '' clears an old note (writes are merged)
+  if (kind === 'out' && ['good', 'meh', 'bad'].includes(t.mood)) o.mood = t.mood;
+  else if (t.id && typeof t.mood === 'string') o.mood = ''; // clears an old mood
   return o;
 }
 
@@ -395,6 +398,7 @@ let autoDone = false;
 function onData() {
   scheduleRender();
   if (!autoDone && S.definitive.months && S.definitive.meta) { autoDone = true; autoRecord(); }
+  checkGifts();
 }
 function onStoreError(e) {
   if (e && e.code === 'revoked') S.mode = 'denied';
@@ -411,7 +415,7 @@ function startLive(db) {
     onData();
   }, onStoreError);
   db.collection('meta').onSnapshot(snap => {
-    let st = null, subs = {}, subsDoc = false, loans = {}, loansDoc = false, sawGoals = false, sawCredit = false, sawMemos = false, sawAccts = false;
+    let st = null, subs = {}, subsDoc = false, loans = {}, loansDoc = false, sawGoals = false, sawCredit = false, sawMemos = false, sawAccts = false, sawRoom = false;
     for (const d of snap.docs) {
       const data = d.data() || {};
       if (d.id === 'settings') st = data;
@@ -421,7 +425,9 @@ function startLive(db) {
       else if (d.id === 'credit') { S.credit = { ...(data.items || {}) }; S.creditDoc = true; sawCredit = true; }
       else if (d.id === 'accounts') { S.accts = { ...(data.items || {}) }; S.acctsDoc = true; sawAccts = true; }
       else if (d.id === 'memos') { S.memos = { ...(data.items || {}) }; S.memosDoc = true; sawMemos = true; }
+      else if (d.id === 'room') { S.room = { ...(data.items || {}) }; S.roomDoc = true; sawRoom = true; }
     }
+    if (!sawRoom) { S.room = {}; S.roomDoc = false; }
     if (!sawCredit) { S.credit = {}; S.creditDoc = false; }
     if (!sawMemos) { S.memos = {}; S.memosDoc = false; }
     if (!sawAccts) { S.accts = {}; S.acctsDoc = false; }
@@ -443,7 +449,7 @@ async function boot() {
   applyTheme(prefs.theme);
   render();
   const c = window.claude;
-  const goLocal = () => { S.mode = 'local'; S.loaded = { months: true, meta: true }; render(); };
+  const goLocal = () => { S.mode = 'local'; S.loaded = { months: true, meta: true }; render(); checkGifts(); };
   if (!c || typeof c.use !== 'function') return goLocal();
   let db = null;
   try { db = await c.use('db'); } catch (e) { db = null; }
@@ -461,8 +467,8 @@ async function boot() {
 /* ================= rendering ================= */
 const $view = document.getElementById('view');
 let raf = 0, deferred = false, lastNotice = null;
-function scheduleRender() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); }); }
-function render() { renderChrome(); renderNotice(); renderView(); }
+function scheduleRender() { stampMemo = null; if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(); }); }
+function render() { stampMemo = null; renderChrome(); renderNotice(); renderView(); }
 const isLoading = () => S.mode === 'loading' || (S.mode === 'live' && !(S.loaded.months && S.loaded.meta));
 
 function renderChrome() {
@@ -510,9 +516,9 @@ function typingInView() {
   const a = document.activeElement;
   return !!a && $view.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(button|checkbox|radio|range|submit)$/.test(a.type)));
 }
-const VIEWS = { home: vHome, list: vList, subs: vSubs, accounts: vAccounts, goals: vGoals, loans: vLoans, credit: vCredit, stats: vStats, budget: vBudget, settings: vSettings };
+const VIEWS = { home: vHome, room: vRoom, list: vList, subs: vSubs, accounts: vAccounts, goals: vGoals, loans: vLoans, credit: vCredit, stats: vStats, budget: vBudget, settings: vSettings };
 function renderView() {
-  if (typingInView()) { deferred = true; return; } // never yank a field out from under the cursor
+  if (typingInView() || rmDrag) { deferred = true; return; } // never yank a field (or a dragged 소품) out from under the cursor
   deferred = false;
   const a = document.activeElement, fid = a && $view.contains(a) && a.id ? a.id : null;
   $view.innerHTML = VIEWS[S.view]();
@@ -537,7 +543,7 @@ function txRow(t) {
   const sub = [c.name]; if (m) sub.push(m.name);
   return `<button class="tx" type="button" data-act="edit-tx" data-id="${esc(t.id)}">
     <span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span>
-    <span class="tx-main"><span class="tx-title">${esc(t.memo || c.name)}${t.sub ? '<span class="tag sub">정기</span>' : ''}${t.loan ? '<span class="tag sub">대출</span>' : ''}${t.ex ? '<span class="tag">예시</span>' : ''}</span><span class="tx-sub">${esc(sub.join(' · '))}</span>${t.note ? `<span class="tx-note" title="${esc(t.note)}">📝 ${esc(noteLine(t.note))}</span>` : ''}</span>
+    <span class="tx-main"><span class="tx-title">${esc(t.memo || c.name)}${t.sub ? '<span class="tag sub">정기</span>' : ''}${t.loan ? '<span class="tag sub">대출</span>' : ''}${t.ex ? '<span class="tag">예시</span>' : ''}${moodBadge(t)}</span><span class="tx-sub">${esc(sub.join(' · '))}</span>${t.note ? `<span class="tx-note" title="${esc(t.note)}">📝 ${esc(noteLine(t.note))}</span>` : ''}</span>
     <span class="tx-amt${t.kind === 'in' ? ' in' : ''}">${signed(t.amount, t.kind)}</span>
   </button>`;
 }
@@ -700,7 +706,7 @@ function vHome() {
 
   return `<div class="cols">
     <div class="col">${hero}${calCard}${homeReportCard()}${pace}${recent}</div>
-    <div class="col">${budget}${homeAcctCard()}${homeHabitCard()}${homeGoalsCard()}${cats}${upc}${meth}</div>
+    <div class="col">${budget}${homeAcctCard()}${homeStampCard()}${homeGoalsCard()}${cats}${upc}${meth}</div>
   </div>`;
 }
 
@@ -891,7 +897,8 @@ function calGrid(ym, list, o) {
     if (x.kind === 'out') e.cats[x.cat || ''] = (e.cats[x.cat || ''] || 0) + x.amount;
   }
   const maxOut = Math.max(0, ...Object.values(by).map(e => e.out));
-  const marks = S.nospend[ym] || {};
+  const marks = S.nospend[ym] || {}, SI = stampInfo();
+  let anyStamp = false;
   const mm = {};
   for (const m of openMemos()) if (m.date && ymOf(m.date) === ym) mm[+m.date.slice(8)] = (mm[+m.date.slice(8)] || 0) + 1;
   const pl = {};
@@ -903,11 +910,12 @@ function calGrid(ym, list, o) {
     const r = e && maxOut ? e.out / maxOut : 0;
     const heat = r === 0 ? '' : r <= 1 / 3 ? ' h1' : r <= 2 / 3 ? ' h2' : ' h3';
     const top = e ? Object.entries(e.cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c]) => catOf(c)) : [];
-    const label = `${+ym.slice(5)}월 ${d}일${ds === t ? ' 오늘' : ''}${e ? `${e.in ? `, 수입 ${won(e.in)}` : ''}${e.out ? `, 지출 ${won(e.out)}` : ''}${top.length ? ` (${top.map(c => c.name).join(', ')})` : ''}` : ', 기록 없음'}`;
-    cells += `<button type="button" class="cal-cell${heat}${ds === t ? ' today' : ''}" id="${o.idp}-${d}" data-act="${o.act}" data-date="${ds}" aria-pressed="${ds === o.sel}" aria-label="${esc(label + (pl[d] ? `, 정기 납부 예정 ${won(pl[d])}` : '') + (mm[d] ? `, 쓸 돈 메모 ${mm[d]}건` : ''))}"><span class="d">${d}${mm[d] ? '<i class="cm" aria-hidden="true">📝</i>' : ''}</span>${!(e && e.out) && marks[ds] ? '<span class="cn">무지출</span>' : ''}${top.length ? `<span class="ce" aria-hidden="true">${top.map(c => esc(c.emoji)).join('')}</span>` : ''}${e && e.in ? `<span class="ci">${amtPair('+', e.in)}</span>` : ''}${e && e.out ? `<span class="co">${amtPair('−', e.out)}</span>` : ''}${pl[d] ? `<span class="cp">${amtPair('', pl[d])}</span>` : ''}</button>`;
+    const stp = SI.days.has(ds); if (stp) anyStamp = true;
+    const label = `${+ym.slice(5)}월 ${d}일${ds === t ? ' 오늘' : ''}${stp ? ', 도장' : ''}${e ? `${e.in ? `, 수입 ${won(e.in)}` : ''}${e.out ? `, 지출 ${won(e.out)}` : ''}${top.length ? ` (${top.map(c => c.name).join(', ')})` : ''}` : ', 기록 없음'}`;
+    cells += `<button type="button" class="cal-cell${heat}${ds === t ? ' today' : ''}" id="${o.idp}-${d}" data-act="${o.act}" data-date="${ds}" aria-pressed="${ds === o.sel}" aria-label="${esc(label + (pl[d] ? `, 정기 납부 예정 ${won(pl[d])}` : '') + (mm[d] ? `, 쓸 돈 메모 ${mm[d]}건` : ''))}"><span class="d">${d}${stp ? '<i class="cst" aria-hidden="true"></i>' : ''}${mm[d] ? '<i class="cm" aria-hidden="true">📝</i>' : ''}</span>${!(e && e.out) && marks[ds] ? '<span class="cn">무지출</span>' : ''}${top.length ? `<span class="ce" aria-hidden="true">${top.map(c => esc(c.emoji)).join('')}</span>` : ''}${e && e.in ? `<span class="ci">${amtPair('+', e.in)}</span>` : ''}${e && e.out ? `<span class="co">${amtPair('−', e.out)}</span>` : ''}${pl[d] ? `<span class="cp">${amtPair('', pl[d])}</span>` : ''}</button>`;
   }
   return `<div class="cal${o.compact ? ' compact' : ''}" role="group" aria-label="${+ym.slice(0, 4)}년 ${+ym.slice(5)}월 달력">${cells}</div>
-    <div class="cal-legend"><span>지출 적음</span><i class="h1"></i><i class="h2"></i><i class="h3"></i><span>많음</span>${Object.keys(pl).length ? '<span class="cp-key">예정</span><span>정기 납부</span>' : ''}${Object.keys(mm).length ? '<span class="cm-key">📝 쓸 돈 메모</span>' : ''}${o.compact ? '<span class="cal-hint">· 날짜를 누르면 그날 내역이 보여요</span>' : ''}</div>`;
+    <div class="cal-legend"><span>지출 적음</span><i class="h1"></i><i class="h2"></i><i class="h3"></i><span>많음</span>${Object.keys(pl).length ? '<span class="cp-key">예정</span><span>정기 납부</span>' : ''}${Object.keys(mm).length ? '<span class="cm-key">📝 쓸 돈 메모</span>' : ''}${anyStamp ? '<span class="cst-key"><i class="cst" aria-hidden="true"></i>도장</span>' : ''}${o.compact ? '<span class="cal-hint">· 날짜를 누르면 그날 내역이 보여요</span>' : ''}</div>`;
 }
 // full and short forms; CSS shows the short one where cells are narrow
 const amtPair = (sign, n) => `<span class="a-full">${sign}${cellAmt(n)}</span><span class="a-short">${sign}${n >= 1e4 ? compact(n) : fmt(n)}</span>`;
@@ -1135,9 +1143,9 @@ function openTxSheet({ id, date } = {}) {
   if (id && !hit) return;
   if (hit) {
     const t = hit.t;
-    F = { mode: 'tx', id, note: t.note || '', origYm: hit.ym, kind: t.kind === 'in' ? 'in' : t.kind === 'move' ? 'move' : 'out', from: t.from || '', to: t.to || '', acct: t.acct || '', amount: t.amount, cat: t.cat, memo: t.memo || '', date: t.date, method: t.method || '', sub: t.sub || '', loan: t.loan || '', ex: !!t.ex, at: t.at || 0, catTouched: true };
+    F = { mode: 'tx', id, note: t.note || '', mood: t.mood || '', origYm: hit.ym, kind: t.kind === 'in' ? 'in' : t.kind === 'move' ? 'move' : 'out', from: t.from || '', to: t.to || '', acct: t.acct || '', amount: t.amount, cat: t.cat, memo: t.memo || '', date: t.date, method: t.method || '', sub: t.sub || '', loan: t.loan || '', ex: !!t.ex, at: t.at || 0, catTouched: true };
   } else {
-    F = { mode: 'tx', id: null, note: '', origYm: null, kind: 'out', amount: 0, cat: lastCat('out'), memo: '', date: isYmd(date) ? date : defaultDate(), method: lastMethod(), sub: '', ex: false, at: 0, catTouched: false };
+    F = { mode: 'tx', id: null, note: '', mood: '', origYm: null, kind: 'out', amount: 0, cat: lastCat('out'), memo: '', date: isYmd(date) ? date : defaultDate(), method: lastMethod(), sub: '', ex: false, at: 0, catTouched: false };
   }
   showSheet(txSheet(), hit ? null : '#f-amount');
 }
@@ -1162,6 +1170,7 @@ function txSheet() {
     </div>
     <div class="field"><label class="lab" for="f-memo">내용</label><input class="input" id="f-memo" list="memoList" maxlength="40" placeholder="${f.kind === 'move' ? '예: 비상금 옮기기, 지역화폐 충전' : f.kind === 'in' ? '예: 10월 급여' : '예: 점심, 마트 장보기'}" value="${esc(f.memo)}"><datalist id="memoList">${memoSuggestions(f.kind).map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist></div>
     ${f.noteOpen || f.note ? `<div class="field note-field"><div class="note-head"><label class="lab" for="f-note">세부 메모 <span class="muted" style="font-weight:400">(선택)</span></label><span class="note-count" id="noteCount">${(f.note || '').length}/${NOTE_MAX}</span></div><textarea class="input note-in" id="f-note" rows="3" maxlength="${NOTE_MAX}" placeholder="예: 친구 3명과 저녁, 1인당 12,000원씩 보내 주기로 함">${esc(f.note || '')}</textarea><div class="chips note-chips" role="group" aria-label="메모에 넣기">${NOTE_TAGS.map(x => `<button class="chip" type="button" data-act="note-tag" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div></div>` : `<button class="card-link note-open" type="button" data-act="note-open">📝 세부 메모 추가</button>`}
+    ${moodField(f)}
     <div class="field"><label class="lab" for="f-date">날짜</label><div class="field-row"><input class="input" type="date" id="f-date" value="${f.date}" required><div class="chips"><button class="chip" type="button" id="fd-0" data-act="f-day" data-d="0" ${pressed(f.date === t)}>오늘</button><button class="chip" type="button" id="fd-1" data-act="f-day" data-d="-1" ${pressed(f.date === addDays(t, -1))}>어제</button></div></div></div>
     ${f.kind === 'out' ? `<div class="field"><span class="lab" id="mLab">결제수단</span><div class="chips" role="group" aria-labelledby="mLab">${cfg().methods.map(m => `<button class="chip" type="button" id="fm-${esc(m.id)}" data-act="f-method" data-id="${esc(m.id)}" ${pressed(f.method === m.id)}>${esc(m.name)}</button>`).join('') || '<span class="muted" style="font-size:13px">설정에서 결제수단을 추가할 수 있어요</span>'}</div></div>` : ''}
     ${acctField(f)}
@@ -1226,6 +1235,7 @@ function saveTx() {
   savePrefs();
   const wasEdit = !!f.id;
   closeSheet();
+  checkGifts();
   if (!wasEdit) mascotCheer();
   if (f.memoId) { markMemoDone(f.memoId, id, tx.amount, tx.date); toast('기록했어요 · 메모는 ‘썼어요’로 정리했어요'); return; }
   const mm = !wasEdit && tx.kind === 'out' && !f.newId ? matchMemo(tx) : null;
@@ -1270,6 +1280,7 @@ function subSheet() {
     <div class="field"><label class="lab" for="s-cat">카테고리</label><select class="input" id="s-cat">${catsOf('out').map(c => `<option value="${esc(c.id)}"${c.id === f.cat ? ' selected' : ''}>${esc(c.emoji)} ${esc(c.name)}</option>`).join('')}</select></div>
     <div class="field"><span class="lab" id="smLab">결제수단</span><div class="chips" role="group" aria-labelledby="smLab">${cfg().methods.map(m => `<button class="chip" type="button" id="sm-${esc(m.id)}" data-act="s-method" data-id="${esc(m.id)}" ${pressed(f.method === m.id)}>${esc(m.name)}</button>`).join('')}</div></div>
     ${showRecord ? `<label class="check"><input type="checkbox" id="s-record"${f.recordNow ? ' checked' : ''}><span>${diffDays(occ, t) === 0 ? '오늘' : mdLabel(occ)} 결제분도 지금 내역에 기록하기</span></label>` : ''}
+    ${isEdit ? subCheckBlock(f) : ''}
     ${isEdit ? `<div class="switch-row"><div><span class="card-t">사용 중</span><p>끄면 결제일이 와도 기록하지 않아요.</p></div><button class="switch" type="button" role="switch" id="s-active" aria-checked="${f.active}" data-act="s-active" aria-label="사용 중"></button></div>` : ''}
     <div class="sheet-actions">${isEdit ? `<button class="btn btn-danger" type="button" data-act="s-delete">${icon('trash')}삭제</button>` : ''}<button class="btn btn-primary btn-block" type="submit" id="s-save" ${canSaveSub() ? '' : 'disabled'}>${isEdit ? '고친 내용 저장' : '추가하기'}</button></div>
   </form>`;
@@ -1283,7 +1294,7 @@ function saveSub() {
     const occ = curPeriodOcc(f);
     since = occ > t ? t : (f.recordNow && cfg().autoSubs ? occ : addDays(t, 1));
   } else if (prev && prev.active === false && f.active && since < t) since = t; // resumed: no backfill for the paused stretch
-  const sub = { name: f.name.trim().slice(0, 30), emoji: firstGrapheme(f.emoji), amount: f.amount, cycle: f.cycle, day: f.day, month: f.month, cat: f.cat, method: f.method, since, active: f.active, ex: !!f.ex, type: f.type === 'bill' ? 'bill' : 'sub', skips: (prev && prev.skips) || {} };
+  const sub = { name: f.name.trim().slice(0, 30), emoji: firstGrapheme(f.emoji), amount: f.amount, cycle: f.cycle, day: f.day, month: f.month, cat: f.cat, method: f.method, since, active: f.active, ex: !!f.ex, type: f.type === 'bill' ? 'bill' : 'sub', skips: (prev && prev.skips) || {}, checkedAt: (prev && prev.checkedAt) || 0 };
   writeSubs({ [id]: sub });
   closeSheet();
   toast(f.id ? '고쳤어요' : `‘${sub.name}’${josa(sub.name,'을/를').slice(-1)} 추가했어요`);
@@ -1785,12 +1796,12 @@ async function loadAccount() {
 }
 function backupData() {
   const settings = clone(cfg());
-  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), goals: clone(S.goals), credit: clone(S.credit), memos: clone(S.memos), accounts: clone(S.accts), deco: clone(S.deco), nospend: clone(S.nospend), months: clone(S.months) };
+  return { app: 'ttb-ledger', version: 1, exportedAt: new Date().toISOString(), settings, subs: clone(S.subs), loans: clone(S.loans), goals: clone(S.goals), credit: clone(S.credit), memos: clone(S.memos), accounts: clone(S.accts), room: clone(S.room), deco: clone(S.deco), nospend: clone(S.nospend), months: clone(S.months) };
 }
 function csvData() {
   const q = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const rows = [['날짜', '구분', '금액', '카테고리', '내용', '결제수단', '세부 메모']];
-  for (const t of [...allTxs()].reverse()) rows.push([t.date, t.kind === 'in' ? '수입' : t.kind === 'move' ? '이체' : '지출', t.kind === 'in' ? t.amount : t.kind === 'move' ? t.amount : -t.amount, t.kind === 'move' ? `${(acctOf(t.from) || {}).name || ''} → ${(acctOf(t.to) || {}).name || ''}` : catOf(t.cat).name, t.memo, (methodOf(t.method) || {}).name || '', t.note || '']);
+  const rows = [['날짜', '구분', '금액', '카테고리', '내용', '결제수단', '세부 메모', '기분']];
+  for (const t of [...allTxs()].reverse()) rows.push([t.date, t.kind === 'in' ? '수입' : t.kind === 'move' ? '이체' : '지출', t.kind === 'in' ? t.amount : t.kind === 'move' ? t.amount : -t.amount, t.kind === 'move' ? `${(acctOf(t.from) || {}).name || ''} → ${(acctOf(t.to) || {}).name || ''}` : catOf(t.cat).name, t.memo, (methodOf(t.method) || {}).name || '', t.note || '', (moodOf(t.mood) || {}).name || '']);
   return '﻿' + rows.map(r => r.map(q).join(',')).join('\r\n');
 }
 async function saveFile(filename, data) {
@@ -1876,7 +1887,9 @@ function applyRestore() {
   const acctP = { ...(b.accounts || {}) }; for (const k in S.accts) if (!(k in acctP)) acctP[k] = null;
   if (Object.keys(acctP).length) writeAccts(acctP);
   for (const k of ['wall', 'mascot']) if (b.deco && typeof b.deco[k] === 'string' && b.deco[k].startsWith('data:image/') && b.deco[k] !== S.deco[k]) writeDeco(k, b.deco[k]);
-  for (const ym in (b.nospend || {})) for (const d in b.nospend[ym]) if (b.nospend[ym][d]) writeNoSpend(d, true);
+  for (const ym in (b.nospend || {})) for (const d in b.nospend[ym]) if (b.nospend[ym][d]) writeNoSpend(d, b.nospend[ym][d], true);
+  const roomP = { ...(b.room || {}) }; for (const k in S.room) if (!(k in roomP)) roomP[k] = null;
+  if (Object.keys(roomP).length) writeRoom(roomP);
   if (b.settings) saveSettings(b.settings);
   toast('백업으로 되살렸어요');
 }
@@ -2124,11 +2137,11 @@ function autoRecordGoals(t, floor) {
 
 /* ================= habits: 무지출 체크, 연속 기록, 주간 리포트 ================= */
 function writeNoSpend(date, on) {
-  const ym = ymOf(date);
-  S.nospend[ym] = { ...(S.nospend[ym] || {}), [date]: on ? true : null };
+  const ym = ymOf(date), v = on ? (typeof on === 'number' || on === true && arguments.length > 2 ? on : Date.now()) : null;
+  S.nospend[ym] = { ...(S.nospend[ym] || {}), [date]: v };
   scheduleRender();
   if (!S.db) return Promise.resolve();
-  const ref = S.db.doc('months/' + ym), patch = { nospend: { [date]: on ? true : null } };
+  const ref = S.db.doc('months/' + ym), patch = { nospend: { [date]: v } };
   return track(enqueue('months/' + ym, async () => {
     try { await retry(() => ref.update(patch)); }
     catch (e) {
@@ -2172,18 +2185,20 @@ function homeHabitCard() {
   </section>`;
 }
 function homeReportCard() {
-  const r = weekReport();
-  if (!r.cur && !r.prev) return '';
+  const r = weekReport(), R = weekReviewBits(r.mon, todayStr());
+  if (!r.cur && !r.prev && !R.M.n) return '';
   const diff = r.cur - r.prev;
   const lines = [];
   lines.push(diff < 0 ? `지난주 같은 기간보다 <b>${won(-diff)}</b> 덜 썼어요.` : diff > 0 ? `지난주 같은 기간보다 <b>${won(diff)}</b> 더 썼어요.` : '지난주 같은 기간과 똑같이 썼어요.');
   const fd = r.food[0] - r.food[1];
   if (r.food[0] || r.food[1]) lines.push(`가장 큰 지출인 식비는 ${fd < 0 ? `<b>${won(-fd)}</b> 줄었어요` : fd > 0 ? `<b>${won(fd)}</b> 늘었어요` : '그대로예요'}.`);
   if (r.top && r.top.c !== 'food') { const c = catOf(r.top.c); lines.push(`${esc(c.emoji)} ${esc(josa(c.name, '이/가'))} 가장 크게 ${r.top.d > 0 ? '늘었어요' : '줄었어요'} (${r.top.d > 0 ? '+' : '−'}${won(Math.abs(r.top.d))}).`); }
+  lines.push(...R.lines);
   return `<section class="card" data-o="6">
-    <div class="card-h"><h2 class="card-t">이번 주 리포트</h2><span class="muted" style="font-size:13px">${mdLabel(r.mon)}부터 ${r.days}일</span></div>
+    <div class="card-h"><h2 class="card-t">이번 주 돌아보기</h2><span class="muted" style="font-size:13px">${mdLabel(r.mon)}부터 ${r.days}일</span></div>
     <p class="report-num">${won(r.cur)}<span class="muted"> 지출</span></p>
     <ul class="report-list">${lines.map(l => `<li>${l}</li>`).join('')}</ul>
+    ${R.html}
   </section>`;
 }
 
@@ -2522,7 +2537,7 @@ function vStats() {
     ${D.big.length ? `<div class="rank">${D.big.map(txRow).join('')}</div>` : emptyBox('지출이 아직 없어요', '')}
   </section>`;
 
-  return head + hero + kpi + `<div class="cols"><div class="col">${trend}${week}${split}</div><div class="col">${cats}${freq}${big}</div></div>`;
+  return head + hero + kpi + `<div class="cols"><div class="col">${trend}${week}${split}</div><div class="col">${moodCard(ym)}${cats}${freq}${big}</div></div>`;
 }
 
 /* ================= 예정된 정기 납부 (구독·고정 납부·대출) ================= */
@@ -3360,7 +3375,9 @@ function mascotLines() {
   if (bs && bs.left > 0) L.push(`오늘은 ${won(Math.floor(bs.left / (daysIn(ym) - +t.slice(8) + 1)))}까지 써도 괜찮아요!`);
   if (bs && bs.left <= 0) L.push('이번 달 예산을 넘었어요. 내일은 무지출 도전 어때요?');
   const h = habitStats();
-  if (h.streak >= 2) L.push(`${h.streak}일째 꼬박꼬박 기록 중이에요. 대단해요!`);
+  const SI = stampInfo(), wn = SI.weeks[weekMon(t)] || 0;
+  if (wn >= 2) L.push(`이번 주 ${wn}일 기록했어요. ${wn >= 4 ? '보너스 도장도 받았어요!' : `${4 - wn}일 더 적으면 보너스 도장!`}`);
+  if (SI.bal >= 3) L.push(`도장 ${SI.bal}개 모았어요. 꼬박방을 꾸며 볼까요?`);
   if (!h.todayAny) L.push('오늘 쓴 돈, 잊기 전에 적어 볼까요?');
   else if (!h.todayOut) L.push('오늘은 아직 쓴 돈이 없어요. 이대로 무지출?');
   const up = plannedIn(addDays(t, 1), addDays(t, 3))[0];
@@ -3748,6 +3765,1021 @@ document.addEventListener('keydown', e => {
   if (saveOrder(list.dataset.list, ids)) toast(`${j + 1}번째로 옮겼어요`);
 });
 
+/* ================= 꼬박방 그림: 이 가계부를 위해 새로 그린 도트 소품 ================= */
+// 한 글자 = 도트 1칸. '.'은 비워 둬요. 방 안에서는 도트 1칸이 2칸 크기로 보여요.
+const PAL = {
+  k: '#3D2E2A', K: '#241B19', w: '#FFFFFF', e: '#FFF4DE', n: '#F2D3AE', b: '#B87A4B', B: '#7C5034', l: '#E0A86C',
+  g: '#5BB56A', G: '#2E7F45', L: '#A9E5A3', r: '#E7584E', R: '#A83A33', p: '#F7A8BF', P: '#DA6A8C', y: '#FFD45C',
+  Y: '#E3A623', o: '#F59B4B', O: '#C9702A', u: '#5F9DE9', U: '#3568B6', c: '#B5E6F8', v: '#A88AE2', V: '#7356BA',
+  s: '#BAC2CA', S: '#6F7883', h: '#E7EBEF', t: '#CB6A40', T: '#8E4428', a: '#8ED4C4', A: '#4FA593', m: '#2B2F45', z: '#FFF0B3',
+};
+const rep = (s, n) => s.repeat(n);
+function gridArt(W, H, paint) { // build art from a painter function
+  const g = Array.from({ length: H }, () => Array(W).fill('.'));
+  paint((x, y, c) => { if (x >= 0 && y >= 0 && x < W && y < H) g[y][x] = c; });
+  return g.map(r => r.join(''));
+}
+const ART = {
+  window: [
+    'BBBBBBBBBBBBBBB',
+    'BccccwcBccccwcB',
+    'BcccwccBcccwccB',
+    'BccwcccBccwcccB',
+    'BccccccBccccccB',
+    'BccccccBccccccB',
+    'BBBBBBBBBBBBBBB',
+    'BccccccBccccccB',
+    'BcwwwccBccccccB',
+    'BwwwwwcBccccwwB',
+    'BccccccBcccwwwB',
+    'BBBBBBBBBBBBBBB',
+    'lllllllllllllll',
+    '.bbbbbbbbbbbbb.',
+  ],
+  curtain: [
+    'BBBBBBBBBBBBBBBBBBBB',
+    ...Array(6).fill('pPpPp..........pPpPp'),
+    'pPpPr..........rpPpP',
+    '.pPp............pPp.',
+    ...Array(5).fill('pPpPp..........pPpPp'),
+    'PpPpP..........PpPpP',
+  ],
+  clock: [
+    '..rrrr..',
+    '.rwwwwr.',
+    'rwwkwwwr',
+    'rwwkwwwr',
+    'rwwkkkwr',
+    'rwwwwwwr',
+    '.rwwwwr.',
+    '..rrrr..',
+  ],
+  frame: [
+    'llllllllllll',
+    'lccccccccyyl',
+    'lccccccccyyl',
+    'lcccgccccccl',
+    'lccgggccgccl',
+    'lcgggggggGcl',
+    'lgggGgggGGgl',
+    'lGGGGGGGGGGl',
+    'llllllllllll',
+  ],
+  poster: [
+    'vvvvvvvvv',
+    'vVVVVVVVv',
+    'vVVVyVVVv',
+    'vVVyyyVVv',
+    'vyyyyyyyv',
+    'vVyyyyyVv',
+    'vVVyVyVVv',
+    'vVyVVVyVv',
+    'vVVVVVVVv',
+    'vVwwwwwVv',
+    'vVVVVVVVv',
+    'vvvvvvvvv',
+  ],
+  shelf: [
+    '..gG......uvr...',
+    '.gGgg.....uvr.y.',
+    '..gG......uvr.y.',
+    '.tttt.....uvr.y.',
+    '.tTTt.....uvr.y.',
+    '.tttt.....uvr.Y.',
+    'bbbbbbbbbbbbbbbb',
+    '.B............B.',
+    '.B............B.',
+  ],
+  lights: gridArt(30, 6, put => {
+    const cols = ['y', 'p', 'c', 'L', 'o', 'v', 'z'];
+    let bi = 0;
+    for (let x = 0; x < 30; x++) {
+      const yy = Math.round(2.4 * (1 - ((x - 14.5) / 14.5) ** 2));
+      put(x, yy, 'k');
+      if (x % 4 === 2) { const c = cols[bi++ % cols.length]; put(x, yy + 1, 'k'); put(x, yy + 2, c); put(x, yy + 3, c); }
+    }
+  }),
+  mirror: [
+    '..llll..',
+    '.lccccl.',
+    'lcwccccl',
+    'lcwccccl',
+    'lccwcccl',
+    'lccccccl',
+    'lccccccl',
+    'lccccccl',
+    'lccccccl',
+    'lccccccl',
+    '.lccccl.',
+    '..llll..',
+  ],
+  calendar: [
+    '..k..k..',
+    'rrrrrrrr',
+    'rrwwwwrr',
+    'wwwwwwww',
+    'wswswsww',
+    'wwwwwwww',
+    'wswsrsww',
+    'wwwwwwww',
+    'ssssssss',
+  ],
+  bed: [
+    'BBB.....................',
+    'BlB.....................',
+    'BlB.....................',
+    'BlB.....................',
+    'BlBwwwwww...............',
+    'BlBwwwwwwppppppppppppppp',
+    'BlBeeeeeepPppPppPppPppPp',
+    'BlBeeeeeeppppppppppppppp',
+    'BlBeeeeeePppPppPppPppPpp',
+    'BlBbbbbbbbbbbbbbbbbbbbbB',
+    'BBBBBBBBBBBBBBBBBBBBBBBB',
+    'BB....................BB',
+  ],
+  desk: [
+    'llllllllllllllllllll',
+    'bbbbbbbbbbbbbbbbbbbb',
+    '.B.........bbbbbbbB.',
+    '.B.........blllllbB.',
+    '.B.........bllyllbB.',
+    '.B.........bbbbbbbB.',
+    '.B.........blllllbB.',
+    '.B.........bllyllbB.',
+    '.B.........bbbbbbbB.',
+    '.B.........B.....BB.',
+    '.B.........B.....BB.',
+    '.B.........B.....BB.',
+  ],
+  chair: [
+    '.....BB.',
+    '.....BlB',
+    '.....BlB',
+    '.....BlB',
+    '.....BlB',
+    'rrrrrrBB',
+    'bbbbbbbB',
+    '.B....B.',
+    '.B....B.',
+    '.B....B.',
+    '.B....B.',
+    '.B....B.',
+  ],
+  lamp: [
+    '..oooo..',
+    '.oyyyyo.',
+    'oyyyyyyo',
+    'oooooooo',
+    'OOOOOOOO',
+    ...Array(13).fill('...kk...'),
+    '..kkkk..',
+    '.kkkkkk.',
+  ],
+  monstera: [
+    '....gg......',
+    '...gGgg..g..',
+    '.ggGgLgggGg.',
+    'gGgg.gGgLgGg',
+    'gLgGg.ggGgg.',
+    '.ggGgggGgg.g',
+    '..gGg.gGg.gG',
+    '.gg..GG..gg.',
+    '....G.G.....',
+    '.....GG.....',
+    '..tttttttt..',
+    '..tTTTTTTt..',
+    '..tttttttt..',
+    '...tttttt...',
+    '...tttttt...',
+    '....tttt....',
+  ],
+  bookshelf: [
+    'BBBBBBBBBBBBBB',
+    'BBuBvBBgBBpBBB',
+    'BruBvyBgoBpuBB',
+    'BruUvyBgoBpuyB',
+    'BruuvyBgoBpuyB',
+    'bbbbbbbbbbbbbb',
+    'BBBBBgBBBuvBBB',
+    'BBBBgGgBBuvrBB',
+    'BBBBtttBBuvrBB',
+    'BBBBtTtBBuvrBB',
+    'bbbbbbbbbbbbbb',
+    'BBBBBBBBBBBBBB',
+    'BeeeeBBBBppBBB',
+    'BeyyeBBBpppPBB',
+    'BeeeeBBBpppBBB',
+    'bbbbbbbbbbbbbb',
+    'BllllllBlllllB',
+    'BlllylBBllyllB',
+    'BllllllBlllllB',
+    'BBBBBBBBBBBBBB',
+  ],
+  sofa: [
+    '...' + rep('v', 18) + '...',
+    '..v' + rep('V', 18) + 'v..',
+    '..v' + rep('V', 18) + 'v..',
+    '..v' + rep('V', 18) + 'v..',
+    'vvv' + rep('V', 18) + 'vvv',
+    'vVv' + rep('v', 9) + 'V' + rep('v', 8) + 'vVv',
+    'vVv' + rep('v', 9) + 'V' + rep('v', 8) + 'vVv',
+    'vVv' + rep('V', 18) + 'vVv',
+    'vVV' + rep('V', 18) + 'VVv',
+    rep('V', 24),
+    '.BB' + rep('.', 18) + 'BB.',
+    '.BB' + rep('.', 18) + 'BB.',
+  ],
+  rug: [
+    '...' + rep('a', 20) + '...',
+    '.aa' + rep('A', 20) + 'aa.',
+    'aAA' + rep('e', 20) + 'AAa',
+    'aAe' + rep('ae', 10) + 'eAa',
+    'aAe' + rep('ea', 10) + 'eAa',
+    'aAe' + rep('ae', 10) + 'eAa',
+    'aAA' + rep('e', 20) + 'AAa',
+    '.aa' + rep('A', 20) + 'aa.',
+    '...' + rep('a', 20) + '...',
+  ],
+  cat: [
+    'o.....o..',
+    'op...po..',
+    'ooooooo..',
+    'okoooko..',
+    'oooPooo..',
+    '.ooooo..o',
+    'oOoooOo.o',
+    'ooOoOoo.o',
+    'oooooooo.',
+    '.OO.OO...',
+  ],
+  fishtank: [
+    'SSSSSSSSSSSS',
+    'sccccccccccs',
+    'scccccccwccs',
+    'sccooOcccccs',
+    'sccccccccwcs',
+    'scccccuuUccs',
+    'scgcccccccgs',
+    'scgGcccccgGs',
+    'snnnnnnnnnns',
+    'SSSSSSSSSSSS',
+    '.B........B.',
+    '.B........B.',
+    '.BBBBBBBBBB.',
+  ],
+  guitar: [
+    '..BB..',
+    '..BB..',
+    '..bB..',
+    '..bB..',
+    '..bB..',
+    '..bB..',
+    '..bB..',
+    '.oooo.',
+    'oooooo',
+    'ookkoo',
+    '.oooo.',
+    'oooooo',
+    'oOoooo',
+    'ooooOo',
+    '.oooo.',
+    '..OO..',
+  ],
+  tv: [
+    'kkkkkkkkkkkkkk',
+    'kUUUUUUUUUUUUk',
+    'kUuUUUUUUUUwUk',
+    'kUUuUUUUUwUUUk',
+    'kUUUUUUUUUUUUk',
+    'kUUUUUUUUUUUUk',
+    'kUUUUUUUUUUUUk',
+    'kkkkkkkkkkkkkk',
+    '.....kkkk.....',
+    'bbbbbbbbbbbbbb',
+    'blllllbblllllb',
+    'bllyllbbllyllb',
+    'bbbbbbbbbbbbbb',
+  ],
+  cactus: [
+    '..g...',
+    '..gG..',
+    'g.gG..',
+    'gGgG.g',
+    '.ggGgG',
+    '..gG..',
+    '.tttt.',
+    '.tTTt.',
+    '..tt..',
+  ],
+  piggy: [
+    '....yy....',
+    '..pPkkPp..',
+    '.pppppppp.',
+    'Ppkppppppp',
+    'Pppppppppp',
+    '.pppppppp.',
+    '.PP....PP.',
+  ],
+  jar: [
+    '.SSSS.',
+    '.ssss.',
+    'hcccch',
+    'hcyych',
+    'hyyyYh',
+    'hyYyyh',
+    'hyyyyh',
+    'hYyyYh',
+    '.hhhh.',
+  ],
+  laptop: [
+    '.SSSSSSS.',
+    '.SccccwS.',
+    '.ScccccS.',
+    '.SccyccS.',
+    '.SSSSSSS.',
+    'sssssssss',
+  ],
+  mug: [
+    '.h.h.',
+    'h.h..',
+    'rrrr.',
+    'rwrrr',
+    'rrrrr',
+    'RRRR.',
+  ],
+  vase: [
+    '.p..y.',
+    'pPpyYy',
+    '.pg.y.',
+    '..gg..',
+    '..gg..',
+    '.uuuu.',
+    'uuuuUu',
+    'uuuuuu',
+    '.uuuu.',
+    '..UU..',
+  ],
+  // 깜짝 선물
+  sprout: [
+    'Lg..gL',
+    '.gGGg.',
+    '..GG..',
+    '..G...',
+    'tttttt',
+    '.tTTt.',
+    '.tttt.',
+    '..tt..',
+  ],
+  trophy: [
+    'YYYYYYYY',
+    'YyywyyyY',
+    '.YyyyyY.',
+    '..YyyY..',
+    '...YY...',
+    '...YY...',
+    '..YYYY..',
+    '.BBBBBB.',
+    '.BlyylB.',
+    '.BBBBBB.',
+  ],
+  rainbow: gridArt(20, 11, put => {
+    const band = ['r', 'o', 'y', 'g', 'u', 'v'];
+    for (let y = 0; y < 11; y++) for (let x = 0; x < 20; x++) {
+      const d = Math.hypot(x + 0.5 - 10, y + 0.5 - 11);
+      const i = Math.floor(10 - d);
+      if (i >= 0 && i < band.length && d <= 10) put(x, y, band[i]);
+    }
+    for (const [cx, cy] of [[2, 9], [17, 9]]) for (let y = -1; y <= 1; y++) for (let x = -2; x <= 2; x++) if (Math.abs(x) + Math.abs(y) < 3) put(cx + x, cy + y, 'w');
+  }),
+  stars: gridArt(18, 10, put => {
+    const star = ['..y..', '.yzy.', 'yzzzy', '.yzy.', '.y.y.'];
+    for (let x = 0; x < 18; x++) put(x, 0, 'k');
+    for (const [sx, sy] of [[0, 3], [6, 5], [12, 2]]) {
+      for (let y = 1; y < sy; y++) put(sx + 2, y, 'k');
+      star.forEach((row, yy) => [...row].forEach((c, xx) => { if (c !== '.') put(sx + xx, sy + yy, c); }));
+    }
+  }),
+  crown: [
+    'y...y...y',
+    'yy.yyy.yy',
+    'yyyyyyyyy',
+    'yyryuyryy',
+    'YYYYYYYYY',
+    '.ppppppp.',
+    'pPPPPPPPp',
+    '.ppppppp.',
+  ],
+};
+// zone: wall 벽 · floor 바닥 · rug 바닥에 깔기 · any 어디든 (책상·선반 위에도)
+const ITEMS = [
+  { id: 'window', name: '창문', zone: 'wall', price: 6, x: 66, y: 16 },
+  { id: 'curtain', name: '분홍 커튼', zone: 'wall', price: 4, x: 61, y: 12 },
+  { id: 'clock', name: '빨간 벽시계', zone: 'wall', price: 3, x: 108, y: 16 },
+  { id: 'frame', name: '산 그림 액자', zone: 'wall', price: 4, x: 18, y: 26 },
+  { id: 'poster', name: '별 포스터', zone: 'wall', price: 3, x: 140, y: 10 },
+  { id: 'shelf', name: '벽 선반', zone: 'wall', price: 6, x: 102, y: 38 },
+  { id: 'lights', name: '꼬마전구', zone: 'wall', price: 5, x: 52, y: 0 },
+  { id: 'mirror', name: '동그란 거울', zone: 'wall', price: 5, x: 144, y: 34 },
+  { id: 'calendar', name: '탁상 달력', zone: 'wall', price: 2, x: 44, y: 28 },
+  { id: 'bed', name: '분홍 침대', zone: 'floor', price: 12, x: 2, y: 94 },
+  { id: 'desk', name: '나무 책상', zone: 'floor', price: 9, x: 116, y: 70 },
+  { id: 'chair', name: '의자', zone: 'floor', price: 4, x: 102, y: 76 },
+  { id: 'lamp', name: '스탠드 조명', zone: 'floor', price: 6, x: 36, y: 52 },
+  { id: 'monstera', name: '몬스테라 화분', zone: 'floor', price: 6, x: 54, y: 62 },
+  { id: 'bookshelf', name: '책장', zone: 'floor', price: 10, x: 4, y: 44 },
+  { id: 'sofa', name: '보라 소파', zone: 'floor', price: 12, x: 62, y: 84 },
+  { id: 'rug', name: '민트 러그', zone: 'rug', price: 6, x: 60, y: 100 },
+  { id: 'cat', name: '치즈 고양이', zone: 'floor', price: 8, x: 50, y: 98 },
+  { id: 'fishtank', name: '어항', zone: 'floor', price: 8, x: 132, y: 92 },
+  { id: 'guitar', name: '통기타', zone: 'floor', price: 7, x: 120, y: 86 },
+  { id: 'tv', name: 'TV', zone: 'floor', price: 10, x: 84, y: 56 },
+  { id: 'cactus', name: '선인장', zone: 'any', price: 3, x: 68, y: 24, sup: 'window' },
+  { id: 'piggy', name: '돼지 저금통', zone: 'any', price: 4, x: 92, y: 104 },
+  { id: 'jar', name: '동전 유리병', zone: 'any', price: 3, x: 112, y: 32, sup: 'shelf' },
+  { id: 'laptop', name: '노트북', zone: 'any', price: 6, x: 134, y: 58, sup: 'desk' },
+  { id: 'mug', name: '머그컵', zone: 'any', price: 2, x: 4, y: 32, sup: 'bookshelf' },
+  { id: 'vase', name: '꽃병', zone: 'any', price: 4, x: 106, y: 98 },
+  // 깜짝 선물 (가게에는 안 보여요)
+  { id: 'sprout', name: '새싹 화분', zone: 'any', price: 0, gift: 7, x: 16, y: 28, sup: 'bookshelf' },
+  { id: 'trophy', name: '금빛 트로피', zone: 'any', price: 0, gift: 30, x: 116, y: 50, sup: 'desk' },
+  { id: 'rainbow', name: '무지개', zone: 'wall', price: 0, gift: 100, x: 6, y: 2 },
+  { id: 'stars', name: '반짝 별 조명', zone: 'wall', price: 0, gift: 200, x: 104, y: 0 },
+  { id: 'crown', name: '꼬박 왕관 쿠션', zone: 'any', price: 0, gift: 365, x: 74, y: 78, sup: 'sofa' },
+];
+for (const it of ITEMS) {
+  const a = ART[it.id], aw = Math.max(...a.map(r => r.length));
+  it.art = a.map(r => r.padEnd(aw, '.')); it.aw = aw; it.ah = a.length; it.w = aw * 2; it.h = a.length * 2;
+}
+const ITEM = Object.fromEntries(ITEMS.map(i => [i.id, i]));
+// 벽지 · 바닥 (도트 무늬로 그려요)
+const BGS = [
+  { id: 'w_cream', kind: 'wall', name: '크림 벽지', price: 0 },
+  { id: 'w_mint', kind: 'wall', name: '민트 줄무늬 벽지', price: 7 },
+  { id: 'w_dots', kind: 'wall', name: '분홍 물방울 벽지', price: 7 },
+  { id: 'w_night', kind: 'wall', name: '밤하늘 벽지', price: 9 },
+  { id: 'f_wood', kind: 'floor', name: '나무 마루', price: 0 },
+  { id: 'f_tile', kind: 'floor', name: '체크 타일', price: 6 },
+  { id: 'f_sky', kind: 'floor', name: '하늘 카펫', price: 6 },
+];
+const BG = Object.fromEntries(BGS.map(b => [b.id, b]));
+const ROOM_W = 160, ROOM_H = 120, FLOOR_Y = 80;
+function bgRects(wall, floor) { // [x, y, w, h, colour]
+  const R = [];
+  if (wall === 'w_mint') { R.push([0, 0, 160, FLOOR_Y, '#DDF3EC']); for (let x = 4; x < 160; x += 16) R.push([x, 0, 8, FLOOR_Y, '#C6EADF']); }
+  else if (wall === 'w_dots') { R.push([0, 0, 160, FLOOR_Y, '#FFE8EF']); for (let y = 4, r = 0; y < FLOOR_Y - 4; y += 10, r++) for (let x = (r % 2) * 6 + 3; x < 160; x += 12) R.push([x, y, 2, 2, '#F7C3D3']); }
+  else if (wall === 'w_night') {
+    R.push([0, 0, 160, FLOOR_Y, '#2B2F45']);
+    for (const [x, y] of [[8, 6], [22, 30], [40, 12], [58, 44], [74, 8], [92, 26], [118, 40], [134, 14], [150, 52], [30, 58], [104, 60], [12, 46], [140, 66], [66, 66]]) R.push([x, y, 2, 2, '#FFF0B3']);
+    R.push([128, 6, 10, 10, '#FFE9A8'], [126, 8, 2, 6, '#FFE9A8'], [138, 8, 2, 6, '#FFE9A8'], [132, 8, 6, 6, '#2B2F45']);
+  } else { R.push([0, 0, 160, FLOOR_Y, '#FFF4DE']); for (let x = 0; x < 160; x += 20) R.push([x, 0, 1, FLOOR_Y, '#F6E7CB']); }
+  if (floor === 'f_tile') { for (let y = FLOOR_Y, r = 0; y < 120; y += 10, r++) for (let x = 0, c = 0; x < 160; x += 10, c++) R.push([x, y, 10, 10, (r + c) % 2 ? '#C9D6E2' : '#F3F6F8']); }
+  else if (floor === 'f_sky') { R.push([0, FLOOR_Y, 160, 40, '#BFD9F2']); for (let y = FLOOR_Y + 3, r = 0; y < 120; y += 6, r++) for (let x = (r % 2) * 4 + 1; x < 160; x += 8) R.push([x, y, 2, 2, '#AACBEA']); }
+  else { R.push([0, FLOOR_Y, 160, 40, '#D9A46D']); for (let y = FLOOR_Y + 6, r = 0; y < 120; y += 7, r++) { R.push([0, y, 160, 1, '#BE8752']); for (let x = (r % 3) * 18 + 10; x < 160; x += 54) R.push([x, y - 6, 1, 6, '#BE8752']); } }
+  R.push([0, FLOOR_Y - 3, 160, 4, '#FFFFFF'], [0, FLOOR_Y + 1, 160, 1, 'rgba(0,0,0,.12)']);
+  return R;
+}
+function artRuns(it) {
+  if (it._runs) return it._runs;
+  const out = [];
+  it.art.forEach((row, y) => {
+    for (let x = 0; x < row.length;) {
+      const ch = row[x];
+      if (!PAL[ch]) { x++; continue; }
+      let e = x + 1; while (e < row.length && row[e] === ch) e++;
+      out.push([x, y, e - x, PAL[ch]]); x = e;
+    }
+  });
+  return (it._runs = out);
+}
+function artSvg(it) {
+  if (it._svg) return it._svg;
+  return (it._svg = `<svg viewBox="0 0 ${it.aw} ${it.ah}" shape-rendering="crispEdges" aria-hidden="true" focusable="false">${artRuns(it).map(([x, y, w, c]) => `<rect x="${x}" y="${y}" width="${w}" height="1.02" fill="${c}"/>`).join('')}</svg>`);
+}
+function bgSvg(wall, floor) {
+  return `<svg class="room-bg" viewBox="0 0 160 120" preserveAspectRatio="none" shape-rendering="crispEdges" aria-hidden="true" focusable="false">${bgRects(wall, floor).map(([x, y, w, h, c]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${c}"/>`).join('')}</svg>`;
+}
+
+/* ================= 기분 1탭 · 기록 도장 · 꼬박방 · 주간 미션 · 회고 카드 ================= */
+/* --- 기분: 지출마다 😊 만족 · 😐 보통 · 😣 아쉬움 (건너뛰어도 돼요) --- */
+const MOODS = [{ id: 'good', emo: '😊', name: '만족' }, { id: 'meh', emo: '😐', name: '보통' }, { id: 'bad', emo: '😣', name: '아쉬움' }];
+const MOOD_IDS = MOODS.map(m => m.id);
+const moodOf = id => MOODS.find(m => m.id === id) || null;
+const moodable = t => t.kind === 'out' && !t.sub && !t.loan; // 자동으로 들어온 정기결제·대출은 빼요
+function moodField(f) {
+  if (f.kind !== 'out' || f.sub || f.loan || f.newId) return '';
+  return `<div class="field mood-field"><span class="lab" id="moodLab">이 지출, 어땠어요? <span class="muted" style="font-weight:400">(선택)</span></span>
+    <div class="mood-opts" role="group" aria-labelledby="moodLab">${MOODS.map(m => `<button type="button" class="mood-opt" id="fmo-${m.id}" data-act="f-mood" data-v="${m.id}" ${pressed(f.mood === m.id)}><span class="me" aria-hidden="true">${m.emo}</span>${m.name}</button>`).join('')}</div></div>`;
+}
+function moodBadge(t) {
+  const m = t.mood && moodOf(t.mood);
+  return m ? `<span class="mood-b" title="${m.name}"><span aria-hidden="true">${m.emo}</span><span class="sr-only">${m.name}</span></span>` : '';
+}
+function moodSum(list) {
+  const r = { n: 0, tagged: 0, amt: { good: 0, meh: 0, bad: 0 }, cnt: { good: 0, meh: 0, bad: 0 }, untagged: [], bad: [] };
+  for (const t of list) {
+    if (!moodable(t)) continue;
+    r.n++;
+    if (MOOD_IDS.includes(t.mood)) { r.tagged++; r.amt[t.mood] += t.amount; r.cnt[t.mood]++; if (t.mood === 'bad') r.bad.push(t); }
+    else r.untagged.push(t);
+  }
+  r.tagAmt = r.amt.good + r.amt.meh + r.amt.bad;
+  r.rate = r.tagAmt > 0 ? r.amt.bad / r.tagAmt : null;
+  r.bad.sort((a, b) => b.amount - a.amount || byRecent(a, b));
+  return r;
+}
+function setMood(id, v) {
+  const hit = findTx(id);
+  if (!hit || S.mode === 'denied' || !MOOD_IDS.includes(v)) return;
+  writeMonth(hit.ym, { [id]: { ...hit.t, mood: hit.t.mood === v ? '' : v } });
+}
+function openMoodSheet(from, to, label) {
+  if (S.mode === 'denied' || !isYmd(from) || !isYmd(to)) return;
+  F = { mode: 'mood', from, to, label: label || '' };
+  showSheet(moodSheet());
+}
+function moodSheet() {
+  const f = F, list = allTxs().filter(t => moodable(t) && t.date >= f.from && t.date <= f.to);
+  const left = list.filter(t => !MOOD_IDS.includes(t.mood)), done = list.filter(t => MOOD_IDS.includes(t.mood));
+  const row = t => {
+    const c = catOf(t.cat);
+    return `<div class="mood-row"><span class="emo" aria-hidden="true"${ccStyle(c)}>${esc(c.emoji)}</span><span class="tx-main"><span class="tx-title">${esc(t.memo || c.name)}</span><span class="tx-sub">${mdLabel(t.date)} · ${esc(c.name)} · ${won(t.amount)}</span></span>
+      <span class="mood-mini" role="group" aria-label="${esc((t.memo || c.name) + ' ' + won(t.amount))} 기분">${MOODS.map(m => `<button type="button" id="mm-${esc(t.id)}-${m.id}" data-act="mood-set" data-id="${esc(t.id)}" data-v="${m.id}" aria-pressed="${t.mood === m.id}" title="${m.name}"><span aria-hidden="true">${m.emo}</span><span class="sr-only">${m.name}</span></button>`).join('')}</span></div>`;
+  };
+  return `<div class="mood-sheet">
+    <div class="sheet-h"><h2 id="sheetTitle">${esc(f.label || '')} 기분 남기기</h2><button class="icon-btn" type="button" data-act="close" aria-label="닫기">${icon('x')}</button></div>
+    <p class="sheet-note">하나씩 눌러도 되고 건너뛰어도 돼요. 고른 것을 한 번 더 누르면 지워져요.</p>
+    ${list.length ? '' : '<p class="muted cal-none">이 기간에는 기분을 남길 지출이 없어요.</p>'}
+    ${left.length ? `<p class="mood-sec">아직 안 남긴 지출 <b>${left.length}건</b></p><div class="rank">${left.map(row).join('')}</div>` : list.length ? '<p class="mood-sec done">이 기간 지출에 기분을 모두 남겼어요 👏</p>' : ''}
+    ${done.length ? `<p class="mood-sec">남긴 지출 ${done.length}건</p><div class="rank">${done.map(row).join('')}</div>` : ''}
+    <div class="sheet-actions"><button class="btn btn-primary btn-block" type="button" data-act="close">다 했어요</button></div>
+  </div>`;
+}
+function moodCard(ym) {
+  const M = moodSum(txsOf(ym));
+  if (!M.n) return '';
+  const P = moodSum(txsOf(addMonths(ym, -1)));
+  const pct = v => Math.round(v * 100) + '%';
+  const last = `${ym}-${pad(daysIn(ym))}`, to = last > todayStr() ? todayStr() : last;
+  const btn = M.untagged.length && S.mode !== 'denied' ? `<button class="btn btn-soft btn-sm" type="button" data-act="mood-batch" data-from="${ym}-01" data-to="${to}" data-t="${mLabel(ym)}">😊😐😣 기분 몰아 남기기 <small class="muted">${M.untagged.length}건</small></button>` : '';
+  const head = `<div class="card-h"><h2 class="card-t">기분으로 본 지출</h2><span class="muted" style="font-size:13px">기분 남긴 지출 ${M.tagged}/${M.n}건</span></div>`;
+  if (!M.tagged) return `<section class="card mood-card">${head}${emptyBox('아직 기분을 남긴 지출이 없어요', '기록할 때 😊 만족 · 😐 보통 · 😣 아쉬움 중 하나를 누르면 아쉬운 지출이 얼마나 되는지 알려 드려요.', btn)}</section>`;
+  let dl = '';
+  if (P.rate != null) {
+    const d = Math.round(M.rate * 100) - Math.round(P.rate * 100);
+    dl = d < 0 ? `<span class="dlt down">지난달보다 ${-d}%p 줄었어요</span>` : d > 0 ? `<span class="dlt up">지난달보다 ${d}%p 늘었어요</span>` : '<span class="dlt">지난달과 같아요</span>';
+  }
+  const seg = id => (M.amt[id] > 0 ? `<span class="s-${id}" style="flex:${(M.amt[id] / M.tagAmt).toFixed(4)}"></span>` : '');
+  const byCat = {};
+  for (const t of M.bad) byCat[t.cat || ''] = (byCat[t.cat || ''] || 0) + t.amount;
+  const topCat = Object.entries(byCat).sort((a, b) => b[1] - a[1])[0];
+  const few = M.tagged < 5 ? '<p class="bud-foot">기분을 5건 이상 남기면 숫자가 더 믿을 만해져요.</p>' : '';
+  return `<section class="card mood-card">${head}
+    <div class="mood-kpi"><div><span class="stat-l">아쉬움률</span><span class="kpi-v">${pct(M.rate)}</span><span class="kpi-s">기분을 남긴 지출 금액 중 😣 아쉬움</span></div>${dl ? `<div class="mood-dl">${dl}</div>` : ''}</div>
+    <div class="split mood-split" role="img" aria-label="만족 ${pct(M.amt.good / M.tagAmt)}, 보통 ${pct(M.amt.meh / M.tagAmt)}, 아쉬움 ${pct(M.rate)}">${seg('good')}${seg('meh')}${seg('bad')}</div>
+    <div class="split-leg mood-leg">${MOODS.map(m => `<div><i class="k m-${m.id}"></i><span class="n">${m.emo} ${m.name} <small>${M.cnt[m.id]}건</small></span><b>${won(M.amt[m.id])}</b><span class="muted">${pct(M.amt[m.id] / M.tagAmt)}</span></div>`).join('')}</div>
+    ${topCat ? `<p class="bud-foot">😣 아쉬움이 가장 많은 곳은 ${esc(catOf(topCat[0]).emoji)} <b>${esc(catOf(topCat[0]).name)}</b>(${won(topCat[1])})이에요. 다음엔 쓸 돈 메모로 먼저 적어 보세요.</p>` : ''}
+    ${M.bad.length ? `<p class="mood-sec">아쉬운 지출</p><div class="rank">${M.bad.slice(0, 3).map(txRow).join('')}</div>` : ''}
+    ${few}${btn ? `<div class="rv-acts">${btn}</div>` : ''}
+  </section>`;
+}
+
+/* --- 기록 도장: 기록한 날 하루 1개 · 주 4일 +2 · 주간 미션 +3 (금액·건수와는 상관없어요) --- */
+const STAMP_RULE = { start: 3, day: 1, weekDays: 4, week: 2, mission: 3 };
+const weekMon = d => addDays(d, -((parseD(d).getDay() + 6) % 7));
+const dayMs = d => parseD(d).getTime();
+const inTime = (d, at) => at >= dayMs(d) && at < dayMs(d) + 2 * 864e5; // 그날 또는 다음 날까지 적은 것만
+let stampMemo = null;
+function stampInfo() {
+  if (stampMemo) return stampMemo;
+  const t = todayStr(), days = new Set();
+  for (const ym in S.months) for (const id in S.months[ym]) {
+    const x = S.months[ym][id];
+    if (!x || x.ex || x.sub || x.loan || !isYmd(x.date) || !(x.amount > 0) || x.date > t) continue;
+    if (inTime(x.date, +x.at || 0)) days.add(x.date);
+  }
+  for (const ym in S.nospend) for (const d in S.nospend[ym]) {
+    const v = S.nospend[ym][d];
+    if (!v || !isYmd(d) || d > t) continue;
+    if (v === true || inTime(d, +v)) days.add(d); // true: 시간을 남기기 전에 체크한 날
+  }
+  const weeks = {};
+  for (const d of days) { const w = weekMon(d); weeks[w] = (weeks[w] || 0) + 1; }
+  const bonusWeeks = Object.keys(weeks).filter(w => weeks[w] >= STAMP_RULE.weekDays);
+  const missionWeeks = Object.keys(S.room).filter(k => k.startsWith('mw_') && S.room[k]).map(k => k.slice(3)).filter(w => { const m = missionState(w); return m && m.done; });
+  let spent = 0;
+  for (const k in S.room) if (k.startsWith('it_') && S.room[k]) spent += +S.room[k].paid || 0;
+  const earned = STAMP_RULE.start + days.size * STAMP_RULE.day + bonusWeeks.length * STAMP_RULE.week + missionWeeks.length * STAMP_RULE.mission;
+  stampMemo = { days, weeks, bonusWeeks: new Set(bonusWeeks), missionWeeks: new Set(missionWeeks), earned, spent, bal: earned - spent, total: days.size };
+  return stampMemo;
+}
+const STAMP_SVG = '<svg class="stamp-i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="7.4" fill="none" stroke="currentColor" stroke-width="1"/><text x="12" y="15.6" text-anchor="middle" font-size="9.5" font-weight="700" fill="currentColor" font-family="sans-serif">꼬</text></svg>';
+function stampStrip(mon) {
+  const t = todayStr(), I = stampInfo();
+  return `<ul class="stamp-week" aria-label="이번 주 도장">${range(0, 6).map(i => {
+    const d = addDays(mon, i), on = I.days.has(d), fut = d > t;
+    return `<li class="sw-d${on ? ' on' : ''}${d === t ? ' today' : ''}${fut ? ' fut' : ''}"><span class="sw-l">${WD[i]}</span><span class="sw-s">${on ? STAMP_SVG : ''}</span><span class="sr-only">${mdLabel(d)} ${on ? '도장 받음' : fut ? '아직 안 온 날' : '기록 없음'}</span></li>`;
+  }).join('')}</ul>`;
+}
+function weekLine(mon) {
+  const n = stampInfo().weeks[mon] || 0;
+  return n >= STAMP_RULE.weekDays ? `이번 주 ${n}일 기록 · 주 4일 보너스 <b>+${STAMP_RULE.week}</b>를 받았어요` : `이번 주 <b>${STAMP_RULE.weekDays - n}일</b> 더 적으면 보너스 도장 +${STAMP_RULE.week}`;
+}
+
+/* --- 주간 미션: 결과가 아니라 행동만 (덜 쓰기 미션은 없어요) --- */
+const weekRange = (a, b) => allTxs().filter(t => !t.ex && t.date >= a && t.date <= b);
+const msIn = (v, a, b) => +v >= dayMs(a) && +v < dayMs(b) + 864e5;
+const MISSIONS = [
+  { id: 'memo2', name: '쓸 돈 메모 2개 정리하기', desc: '메모해 둔 지출을 기록으로 옮기거나 ‘안 사기로’ 정해요', need: 2, count: (a, b) => memosArr().filter(m => !m.ex && (m.status === 'done' || m.status === 'drop') && m.doneAt >= a && m.doneAt <= b).length },
+  { id: 'mood5', name: '지출 5건에 기분 남기기', desc: '😊 만족 · 😐 보통 · 😣 아쉬움 중 하나를 눌러요', need: 5, count: (a, b) => weekRange(a, b).filter(t => moodable(t) && MOOD_IDS.includes(t.mood)).length },
+  { id: 'next1', name: '아쉬운 지출에 ‘다음엔’ 남기기', desc: '😣 아쉬움 지출의 세부 메모에 ‘🔁 다음엔’을 적어요', need: 1, count: (a, b) => weekRange(a, b).filter(t => t.mood === 'bad' && /다음엔/.test(t.note || '')).length },
+  { id: 'note3', name: '지출 3건에 세부 메모 남기기', desc: '누구와 · 어디서 · 왜 샀는지 한 줄이면 충분해요', need: 3, count: (a, b) => weekRange(a, b).filter(t => t.kind === 'out' && String(t.note || '').trim()).length },
+  { id: 'acct1', name: '통장 잔액 한 번 맞추기', desc: '앱에 있는 잔액을 실제 잔액과 맞춰요', need: 1, when: () => acctsArr().some(a => !a.ex), count: (a, b) => acctsArr().filter(x => !x.ex && msIn(x.baseAt, a, b)).length },
+  { id: 'sub1', name: '정기결제 1개 점검하기', desc: '정기결제를 열어 ‘필요해요 · 점검 완료’를 눌러요', need: 1, when: () => subsArr().some(s => s.active && !s.ex), count: (a, b) => subsArr().filter(s => !s.ex && msIn(s.checkedAt, a, b)).length },
+];
+function missionOffer(mon) {
+  const pool = MISSIONS.filter(m => !m.when || m.when());
+  let h = 0;
+  for (const ch of mon) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const order = pool.map((m, i) => ({ m, k: ((h ^ (i * 2654435761)) >>> 0) % 1000 + i / 100 })).sort((a, b) => a.k - b.k);
+  return order.slice(0, 3).map(x => x.m);
+}
+function missionState(w) {
+  const e = S.room['mw_' + w], m = e && MISSIONS.find(x => x.id === e.pick);
+  if (!m) return null;
+  const n = m.count(w, addDays(w, 6));
+  return { m, n: Math.min(n, m.need), need: m.need, done: n >= m.need };
+}
+function missionPanel(mon, compact) {
+  const st = missionState(mon);
+  if (st) {
+    return `<div class="mission${st.done ? ' done' : ''}"><div class="ms-h"><span class="ms-t">🎯 ${esc(st.m.name)}</span><span class="ms-p">${st.n}/${st.need}</span></div>${meter(st.n / st.need, '', true)}
+      <p class="ms-d">${st.done ? `미션 완료! 도장 <b>+${STAMP_RULE.mission}</b>을 받았어요.` : esc(st.m.desc)}</p>${!st.done && !compact && S.mode !== 'denied' ? '<button class="card-link" type="button" data-act="ms-change">다른 미션 고르기</button>' : ''}</div>`;
+  }
+  if (compact) return `<p class="bud-foot">🎯 이번 주 미션을 아직 안 골랐어요. 마치면 도장 +${STAMP_RULE.mission} <button class="card-link" type="button" data-act="go-room">고르러 가기</button></p>`;
+  return `<div class="mission pick"><p class="ms-q">이번 주 미션을 하나 골라요 · 마치면 도장 <b>+${STAMP_RULE.mission}</b></p><div class="ms-opts">${missionOffer(mon).map(m => `<button type="button" class="ms-opt" id="ms-${m.id}" data-act="ms-pick" data-id="${m.id}" ${S.mode === 'denied' ? 'disabled' : ''}><b>${esc(m.name)}</b><span>${esc(m.desc)}</span></button>`).join('')}</div></div>`;
+}
+
+/* --- 꼬박방 데이터: meta/room 문서 하나에 모아요 --- */
+function writeRoom(patch) {
+  S.room = { ...S.room, ...patch };
+  scheduleRender();
+  if (!S.db) return Promise.resolve();
+  const ref = S.db.doc('meta/room');
+  return track(enqueue('meta/room', async () => {
+    try { await retry(() => ref.update({ items: patch })); }
+    catch (e) {
+      if (e && e.code === 'invalid_argument' && !S.roomDoc) await retry(() => ref.set({ items: patch }));
+      else throw e;
+    }
+    S.roomDoc = true;
+  }));
+}
+const CHAR = { id: 'char', name: '캐릭터', zone: 'any', w: 22, h: 24, x: 70, y: 92 };
+const roomEnt = id => S.room['it_' + id] || null;
+const ownsBg = id => !!BG[id] && (!BG[id].price || !!roomEnt(id));
+function roomSet() {
+  const s = S.room.set || {};
+  return { wall: BG[s.wall] && BG[s.wall].kind === 'wall' && ownsBg(s.wall) ? s.wall : 'w_cream', floor: BG[s.floor] && BG[s.floor].kind === 'floor' && ownsBg(s.floor) ? s.floor : 'f_wood' };
+}
+const charOn = () => { const e = roomEnt('char'); return !e || e.on !== false; };
+const charName = () => (look().char === 'mine' && S.deco.mascot ? '내 캐릭터' : '꼬박이');
+function charPic() { return look().char === 'mine' && S.deco.mascot ? `<img src="${S.deco.mascot}" alt="">` : COIN_SVG; }
+function clampPos(it, x, y) {
+  let lo = 0, hi = ROOM_H - it.h;
+  if (it.zone === 'wall') hi = FLOOR_Y + 2 - it.h;
+  else if (it.zone === 'floor') { lo = FLOOR_Y + 6 - it.h; hi = ROOM_H - 1 - it.h; }
+  else if (it.zone === 'rug') { lo = FLOOR_Y + 2; hi = ROOM_H - it.h; }
+  const snap = v => Math.round(v / 2) * 2;
+  return { x: snap(Math.max(0, Math.min(ROOM_W - it.w, +x || 0))), y: snap(Math.max(lo, Math.min(Math.max(lo, hi), +y || 0))) };
+}
+function placedItems() {
+  const out = [];
+  for (const it of ITEMS) { const e = roomEnt(it.id); if (e && e.on) out.push({ it, ...clampPos(it, e.x ?? it.x, e.y ?? it.y) }); }
+  if (charOn()) { const e = roomEnt('char') || {}; const it = { ...CHAR, name: charName() }; out.push({ it, ...clampPos(it, e.x ?? CHAR.x, e.y ?? CHAR.y) }); }
+  return out;
+}
+const zOf = (it, y) => (it.zone === 'rug' ? 1 : it.zone === 'wall' ? 2 : 10 + Math.round(y + it.h));
+const pcs = (v, of) => (v / of * 100).toFixed(3) + '%';
+const posStyle = (it, x, y) => `left:${pcs(x, ROOM_W)};top:${pcs(y, ROOM_H)};width:${pcs(it.w, ROOM_W)};height:${pcs(it.h, ROOM_H)};z-index:${zOf(it, y)}`;
+function roomHtml(edit) {
+  const set = roomSet(), sel = S.roomSel;
+  const items = placedItems().map(({ it, x, y }) => {
+    const pic = it.id === 'char' ? `<span class="rm-char">${charPic()}</span>` : artSvg(it);
+    return edit
+      ? `<button type="button" class="rm-item${sel === it.id ? ' sel' : ''}" id="rm-${it.id}" data-act="rm-sel" data-id="${it.id}" style="${posStyle(it, x, y)}" aria-pressed="${sel === it.id}" aria-label="${esc(it.name)}">${pic}</button>`
+      : `<span class="rm-item" style="${posStyle(it, x, y)}">${pic}</span>`;
+  }).join('');
+  return `<span class="room${edit ? ' edit' : ''}"${edit ? ' id="room"' : ''}>${bgSvg(set.wall, set.floor)}${items}</span>`;
+}
+// 책상·선반 위에 놓는 소품은 받침이 없으면 바닥에 놓아요
+function defaultPos(it) {
+  const s = it.sup && roomEnt(it.sup);
+  return it.sup && !(s && s.on) ? { x: it.x, y: ROOM_H - 4 - it.h } : { x: it.x, y: it.y };
+}
+function itemOf(id) { return id === 'char' ? { ...CHAR, name: charName() } : ITEM[id] || null; }
+function saveRoomPos(id, x, y) {
+  const it = itemOf(id); if (!it) return;
+  const p = clampPos(it, x, y), cur = roomEnt(id) || { paid: 0, at: Date.now() };
+  if (cur.on && cur.x === p.x && cur.y === p.y) return;
+  writeRoom({ ['it_' + id]: { ...cur, x: p.x, y: p.y, on: true } });
+}
+function buyItem(id) {
+  const it = ITEM[id] || BG[id];
+  if (!it || S.mode === 'denied' || roomEnt(id) || it.gift || !(it.price > 0)) return;
+  const bal = stampInfo().bal;
+  if (bal < it.price) { toast(`도장이 ${it.price - bal}개 더 필요해요`); return; }
+  const k = 'it_' + id, isBg = !!BG[id], prevSet = S.room.set || null;
+  const patch = { [k]: isBg ? { paid: it.price, at: Date.now() } : { ...defaultPos(it), on: true, paid: it.price, at: Date.now() } };
+  if (isBg) patch.set = { ...roomSet(), [it.kind]: id };
+  writeRoom(patch);
+  if (!isBg) S.roomSel = id;
+  toast(`‘${it.name}’${josa(it.name, '을/를').slice(-1)} 들였어요 · 도장 ${it.price}개`, { undo: () => { const p = { [k]: null }; if (isBg) p.set = prevSet; if (S.roomSel === id) S.roomSel = null; writeRoom(p); } });
+}
+function storeItem(id) {
+  const cur = roomEnt(id);
+  if (S.mode === 'denied') return;
+  if (id === 'char') writeRoom({ it_char: { ...(cur || { paid: 0, x: CHAR.x, y: CHAR.y }), on: false } });
+  else if (cur) writeRoom({ ['it_' + id]: { ...cur, on: false } });
+  if (S.roomSel === id) S.roomSel = null;
+}
+function placeItem(id) {
+  const it = itemOf(id), cur = roomEnt(id);
+  if (!it || S.mode === 'denied' || (id !== 'char' && !cur)) return;
+  const d = id === 'char' ? { x: CHAR.x, y: CHAR.y } : defaultPos(it);
+  writeRoom({ ['it_' + id]: { ...(cur || { paid: 0 }), x: cur && cur.x != null ? cur.x : d.x, y: cur && cur.y != null ? cur.y : d.y, on: true } });
+  S.roomSel = id;
+}
+/* --- 깜짝 선물: 누적 기록일 7·30·100·200·365일 (미리 알려 주지 않아요) --- */
+const giftTried = new Set();
+function checkGifts() {
+  if (!(S.mode === 'local' || (S.mode === 'live' && S.definitive.meta && S.definitive.months))) return;
+  const n = stampInfo().total;
+  for (const it of ITEMS) {
+    if (!it.gift || n < it.gift || roomEnt(it.id) || giftTried.has(it.id)) continue;
+    giftTried.add(it.id);
+    writeRoom({ ['it_' + it.id]: { ...defaultPos(it), on: true, paid: 0, gift: true, at: Date.now() } });
+    toast(`🎁 깜짝 선물! 꼬박방에 ‘${it.name}’${josa(it.name, '이/가').slice(-1)} 생겼어요`, { undo: () => go('room'), label: '보러 가기', ms: 9000 });
+  }
+}
+
+/* --- 꼬박방 화면 --- */
+const SHOP_TABS = [['floor', '가구'], ['wall', '벽에 걸기'], ['any', '작은 소품'], ['bg', '벽지·바닥']];
+function shopTile(it, bal) {
+  const e = roomEnt(it.id), own = !!e, dis = S.mode === 'denied' ? 'disabled' : '';
+  let btn;
+  if (!own) btn = `<button class="btn btn-sm ${bal >= it.price ? 'btn-primary' : 'btn-soft'}" type="button" id="buy-${it.id}" data-act="rm-buy" data-id="${it.id}" ${bal >= it.price && !dis ? '' : 'disabled'} aria-label="${esc(it.name)}, 도장 ${it.price}개로 들이기">${STAMP_SVG}${it.price}개</button>`;
+  else if (e.on) btn = `<button class="btn btn-ghost btn-sm" type="button" data-act="rm-store" data-id="${it.id}" ${dis} aria-label="${esc(it.name)} 넣어 두기">넣어 두기</button>`;
+  else btn = `<button class="btn btn-soft btn-sm" type="button" data-act="rm-place" data-id="${it.id}" ${dis} aria-label="${esc(it.name)} 방에 놓기">방에 놓기</button>`;
+  return `<div class="shop-it${own ? ' own' : ''}"><span class="shop-pic">${artSvg(it)}</span><span class="shop-name">${esc(it.name)}${it.gift ? '<span class="tag">선물</span>' : ''}</span>${!own && bal < it.price ? `<span class="shop-need">${it.price - bal}개 더 모으면 돼요</span>` : own ? `<span class="shop-need">${e.on ? '방에 있어요' : '넣어 둠'}</span>` : ''}${btn}</div>`;
+}
+function bgTile(b, bal) {
+  const set = roomSet(), own = ownsBg(b.id), active = set[b.kind] === b.id, dis = S.mode === 'denied' ? 'disabled' : '';
+  const pic = b.kind === 'wall' ? bgSvg(b.id, set.floor) : bgSvg(set.wall, b.id);
+  let btn;
+  if (!own) btn = `<button class="btn btn-sm ${bal >= b.price ? 'btn-primary' : 'btn-soft'}" type="button" id="buy-${b.id}" data-act="rm-buy" data-id="${b.id}" ${bal >= b.price && !dis ? '' : 'disabled'} aria-label="${esc(b.name)}, 도장 ${b.price}개로 들이기">${STAMP_SVG}${b.price}개</button>`;
+  else if (active) btn = '<button class="btn btn-ghost btn-sm" type="button" disabled>쓰는 중</button>';
+  else btn = `<button class="btn btn-soft btn-sm" type="button" data-act="rm-bg" data-id="${b.id}" ${dis} aria-label="${esc(b.name)}로 바꾸기">바꾸기</button>`;
+  return `<div class="shop-it${own ? ' own' : ''}"><span class="shop-pic bg ${b.kind}">${pic}</span><span class="shop-name">${esc(b.name)}</span>${!own && bal < b.price ? `<span class="shop-need">${b.price - bal}개 더 모으면 돼요</span>` : ''}${btn}</div>`;
+}
+function shopCard() {
+  const tab = SHOP_TABS.some(x => x[0] === S.roomTab) ? S.roomTab : 'floor', bal = Math.max(0, stampInfo().bal);
+  let tiles;
+  if (tab === 'bg') tiles = BGS.map(b => bgTile(b, bal));
+  else {
+    tiles = ITEMS.filter(it => (it.zone === tab || (tab === 'floor' && it.zone === 'rug')) && (!it.gift || roomEnt(it.id))).map(it => shopTile(it, bal));
+    if (tab === 'any') {
+      const on = charOn();
+      tiles.unshift(`<div class="shop-it own"><span class="shop-pic"><span class="rm-char">${charPic()}</span></span><span class="shop-name">${esc(charName())}</span><span class="shop-need">${on ? '방에 있어요' : '넣어 둠'} · 설정 → 꾸미기에서 바꿔요</span><button class="btn btn-sm ${on ? 'btn-ghost' : 'btn-soft'}" type="button" data-act="${on ? 'rm-store' : 'rm-place'}" data-id="char" ${S.mode === 'denied' ? 'disabled' : ''}>${on ? '넣어 두기' : '방에 놓기'}</button></div>`);
+    }
+  }
+  return `<section class="card shop-card"><div class="card-h"><h2 class="card-t">소품 가게</h2><span class="stamp-bal sm">${STAMP_SVG}<b>${bal}</b>개</span></div>
+    <div class="seg shop-tabs" role="group" aria-label="소품 종류">${SHOP_TABS.map(([v, n]) => `<button type="button" id="st-${v}" data-act="rm-tab" data-v="${v}" aria-pressed="${tab === v}">${n}</button>`).join('')}</div>
+    <div class="shop-grid">${tiles.join('')}</div>
+    <p class="bud-foot">들인 소품은 넣어 뒀다가 언제든 다시 놓을 수 있어요. 도장은 돈으로 살 수 없어요.</p></section>`;
+}
+function stampLog() {
+  const I = stampInfo(), t = todayStr();
+  const rows = [];
+  for (let i = 0; i < 4; i++) {
+    const mon = addDays(weekMon(t), -7 * i), n = I.weeks[mon] || 0, b = I.bonusWeeks.has(mon) ? STAMP_RULE.week : 0, ms = I.missionWeeks.has(mon) ? STAMP_RULE.mission : 0;
+    rows.push(`<tr><td>${i === 0 ? '이번 주' : `${mdLabel(mon)}~`}</td><td>${n}일</td><td>${b ? '+' + b : '–'}</td><td>${ms ? '+' + ms : '–'}</td><td><b>${n + b + ms}</b></td></tr>`);
+  }
+  return `<div class="tbl-wrap"><table class="tbl stamp-tbl"><caption class="sr-only">최근 4주 도장</caption><thead><tr><th scope="col">주</th><th scope="col">기록한 날</th><th scope="col">주 4일</th><th scope="col">미션</th><th scope="col">도장</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
+    <p class="bud-foot">지금까지 받은 도장 ${I.earned}개(시작 선물 ${STAMP_RULE.start}개 포함) · 소품에 쓴 도장 ${I.spent}개</p>`;
+}
+function vRoom() {
+  const I = stampInfo(), t = todayStr(), mon = weekMon(t);
+  const head = `<div class="view-h"><h1 class="view-title">꼬박방</h1><span class="stamp-bal" title="쓸 수 있는 도장">${STAMP_SVG}<b>${Math.max(0, I.bal)}</b>개</span></div>`;
+  if (isLoading()) return head + `<section class="card">${emptyBox('불러오는 중이에요', '')}</section>`;
+  const edit = S.mode !== 'denied';
+  const sel = S.roomSel && itemOf(S.roomSel) && (S.roomSel === 'char' ? charOn() : (roomEnt(S.roomSel) || {}).on) ? S.roomSel : null;
+  const sIt = sel && itemOf(sel);
+  const nudge = [[-1, 0, 'left', '왼쪽'], [0, -1, 'up', '위'], [0, 1, 'down', '아래'], [1, 0, 'right', '오른쪽']];
+  const tools = sIt
+    ? `<div class="rm-tools" role="group" aria-label="${esc(sIt.name)} 옮기기"><span class="rm-sel-name">${esc(sIt.name)}</span><span class="rm-arrows">${nudge.map(([dx, dy, ic, n]) => `<button class="icon-btn" type="button" data-act="rm-nudge" data-dx="${dx}" data-dy="${dy}" aria-label="${n}으로 옮기기">${icon(ic)}</button>`).join('')}</span><button class="btn btn-ghost btn-sm" type="button" data-act="rm-store" data-id="${sel}">넣어 두기</button><button class="btn btn-soft btn-sm" type="button" data-act="rm-done">다 했어요</button></div>`
+    : `<p class="rm-hint">${edit ? '소품을 끌어서 옮겨요. 눌러서 고른 뒤 화살표로도 옮길 수 있어요.' : '이 방은 만든 사람만 꾸밀 수 있어요.'}</p>`;
+  const stage = `<section class="card room-card">${roomHtml(edit)}${tools}<div class="rv-acts"><button class="btn btn-soft btn-sm" type="button" data-act="week-card">${icon('down', 'sm')}이번 주 카드 저장</button><span class="muted rv-note">금액은 담기지 않아요</span></div></section>`;
+  const week = `<section class="card"><div class="card-h"><h2 class="card-t">이번 주 도장</h2><span class="muted" style="font-size:13px">${mdLabel(mon)} ~ ${mdLabel(addDays(mon, 6))}</span></div>
+    ${stampStrip(mon)}<p class="bud-foot">${!I.total && hasExamples() ? '예시 기록에는 도장이 찍히지 않아요. 내 기록을 남기면 그날 도장을 받아요.' : weekLine(mon)}</p>
+    ${missionPanel(mon, false)}</section>`;
+  const rules = `<section class="card"><div class="card-h"><h2 class="card-t">도장 받는 법</h2></div>
+    <ul class="report-list rules">
+      <li>그날이나 다음 날까지 적은 기록이 있으면 <b>하루 1개</b>예요. 무지출 체크도 돼요.</li>
+      <li>한 주(월~일)에 <b>4일 이상</b> 적으면 <b>+${STAMP_RULE.week}</b>개를 더 받아요. 하루 빠져도 괜찮아요.</li>
+      <li>고른 <b>주간 미션</b>을 마치면 <b>+${STAMP_RULE.mission}</b>개예요.</li>
+      <li>금액이나 건수는 상관없어요. 적게 썼다고 더 주지 않아요. 솔직하게 적는 게 제일 중요해요.</li>
+      <li>예시 기록과 자동으로 들어온 정기결제·대출은 세지 않아요.</li>
+      <li>꾸준히 적다 보면 <b>깜짝 선물</b>이 찾아와요.</li>
+    </ul>${stampLog()}</section>`;
+  return head + `<div class="cols"><div class="col">${stage}${shopCard()}</div><div class="col">${week}${rules}</div></div>`;
+}
+
+/* --- 한눈에: 꼬박 도장 카드 · 이번 주 돌아보기 --- */
+function homeStampCard() {
+  const h = habitStats(), t = todayStr(), mon = weekMon(t), I = stampInfo(), n = I.weeks[mon] || 0;
+  const todayBtn = h.todayOut ? `<p class="bud-foot">${I.days.has(t) ? '오늘 도장을 받았어요. 내일도 꼬박꼬박!' : '오늘 기록이 있어요. 내일도 꼬박꼬박 적어 봐요.'}</p>`
+    : h.todayMarked ? `<p class="bud-foot">오늘은 무지출로 체크했어요. <button class="card-link" type="button" data-act="nospend" data-date="${t}" data-on="0">체크 취소</button></p>`
+    : `<div class="habit-acts"><button class="btn btn-soft btn-sm" type="button" data-act="nospend" data-date="${t}" data-on="1" ${S.mode === 'denied' ? 'disabled' : ''}>오늘은 돈을 안 썼어요</button><button class="btn btn-ghost btn-sm" type="button" data-act="add">${icon('plus')}오늘 기록하기</button></div>`;
+  return `<section class="card stamp-card" data-o="4">
+    <div class="card-h"><h2 class="card-t">꼬박 도장</h2><button class="card-link" type="button" data-act="go-room">꼬박방${icon('right')}</button></div>
+    <button class="room-mini" type="button" data-act="go-room" aria-label="꼬박방 보러 가기">${roomHtml(false)}</button>
+    ${stampStrip(mon)}
+    <div class="habit-row three"><div><span class="stat-l">이번 주</span><span class="habit-num">${n}<small>/7일</small></span></div><div><span class="stat-l">모은 도장</span><span class="habit-num">${Math.max(0, I.bal)}<small>개</small></span></div><div><span class="stat-l">이번 달 무지출</span><span class="habit-num">${h.noSpendMonth}<small>일</small></span></div></div>
+    <p class="bud-foot">${!I.total && hasExamples() ? '예시 기록에는 도장이 찍히지 않아요. 내 기록을 남기면 그날 도장을 받아요.' : weekLine(mon)}</p>
+    ${missionPanel(mon, true)}
+    ${todayBtn}
+  </section>`;
+}
+function weekReviewBits(mon, t) {
+  const wk = allTxs().filter(x => x.date >= mon && x.date <= t), M = moodSum(wk), lines = [];
+  if (M.tagged) lines.push(`기분을 남긴 지출 ${M.tagged}건 중 😣 아쉬움은 <b>${M.cnt.bad}건</b>${M.amt.bad ? `(${won(M.amt.bad)})` : ''}이에요.`);
+  const memoTx = new Set(memosArr().filter(m => m.status === 'done' && m.tx).map(m => m.tx));
+  const outs = wk.filter(moodable), outSum = sum(outs.map(x => x.amount)), plan = sum(outs.filter(x => memoTx.has(x.id)).map(x => x.amount));
+  if (plan > 0 && outSum > 0) lines.push(`📝 미리 메모하고 쓴 돈이 이번 주 생활비의 <b>${share(plan, outSum)}</b>예요.`);
+  const bad = M.bad.slice(0, 3);
+  const badList = bad.length ? `<div class="rv-bad"><p class="mood-sec">😣 아쉬운 지출</p>${bad.map(x => `<button class="rv-row" type="button" data-act="edit-tx" data-id="${esc(x.id)}"><span>${esc(x.memo || catOf(x.cat).name)}</span><b>${won(x.amount)}</b></button>`).join('')}</div>` : '';
+  let sug = '';
+  if (M.bad.length) {
+    const by = {};
+    for (const x of M.bad) by[x.cat || ''] = (by[x.cat || ''] || 0) + x.amount;
+    const cid = Object.entries(by).sort((a, b) => b[1] - a[1])[0][0], c = catOf(cid);
+    sug = `<p class="rv-sug">다음 주엔 ${esc(c.emoji)} <b>${esc(c.name)}</b> 지출을 쓸 돈 메모로 먼저 적어 볼까요? <button class="card-link" type="button" data-act="rv-memo" data-cat="${esc(cid)}" ${S.mode === 'denied' ? 'disabled' : ''}>메모 쓰기</button></p>`;
+  }
+  const acts = `<div class="rv-acts">${M.untagged.length && S.mode !== 'denied' ? `<button class="btn btn-soft btn-sm" type="button" data-act="mood-batch" data-from="${mon}" data-to="${t}" data-t="이번 주">😊😐😣 기분 남기기 <small class="muted">${M.untagged.length}건</small></button>` : ''}<button class="btn btn-ghost btn-sm" type="button" data-act="week-card">${icon('down', 'sm')}이번 주 카드 저장</button></div>`;
+  return { M, lines, html: badList + sug + acts };
+}
+
+/* --- 이번 주 카드 (PNG): 방 그림 + 도장 + 기분, 금액은 넣지 않아요 --- */
+function drawCoin(ctx, x, y, w, h) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(w / 120, h / 128);
+  const fill = (c, f) => { ctx.fillStyle = c; f(); ctx.fill(); };
+  const ell = (cx, cy, rx, ry) => () => { ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); };
+  ctx.fillStyle = '#5DBB63'; ctx.fill(new Path2D('M60 22c-2-10 3-17 13-19-1 9-5 15-13 19z'));
+  ctx.fillStyle = '#7ED07F'; ctx.fill(new Path2D('M60 22c-6-8-14-9-21-5 5 7 12 9 21 5z'));
+  ctx.lineCap = 'round'; ctx.strokeStyle = '#3E8E45'; ctx.lineWidth = 3; ctx.stroke(new Path2D('M60 21v8'));
+  ctx.globalAlpha = 0.12; fill('#000', ell(60, 122, 30, 4)); ctx.globalAlpha = 1;
+  fill('#F2B632', ell(60, 74, 46, 46)); fill('#FFCF4D', ell(60, 74, 38, 38));
+  ctx.setLineDash([3, 5]); ctx.strokeStyle = '#E5A520'; ctx.lineWidth = 2; ell(60, 74, 38, 38)(); ctx.stroke(); ctx.setLineDash([]);
+  fill('#3A2A12', ell(44, 70, 5, 6.5)); fill('#3A2A12', ell(76, 70, 5, 6.5));
+  fill('#fff', ell(46, 67.5, 1.8, 1.8)); fill('#fff', ell(78, 67.5, 1.8, 1.8));
+  ctx.globalAlpha = 0.55; fill('#FF8A65', ell(36, 84, 6, 3.5)); fill('#FF8A65', ell(84, 84, 6, 3.5)); ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#3A2A12'; ctx.lineWidth = 3; ctx.stroke(new Path2D('M51 85c5 6 13 6 18 0'));
+  ctx.restore();
+}
+const loadImg = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+async function drawRoom(ctx, ox, oy, k) {
+  const set = roomSet(), R = (x, y, w, h, c) => { const x0 = Math.round(ox + x * k), y0 = Math.round(oy + y * k); ctx.fillStyle = c; ctx.fillRect(x0, y0, Math.round(ox + (x + w) * k) - x0, Math.round(oy + (y + h) * k) - y0); };
+  for (const [x, y, w, h, c] of bgRects(set.wall, set.floor)) R(x, y, w, h, c);
+  const items = placedItems().sort((a, b) => zOf(a.it, a.y) - zOf(b.it, b.y));
+  for (const { it, x, y } of items) {
+    if (it.id === 'char') {
+      const mine = look().char === 'mine' && S.deco.mascot;
+      if (mine) {
+        try { const img = await loadImg(S.deco.mascot); const s = Math.min(it.w * k / img.width, it.h * k / img.height); const w = img.width * s, h = img.height * s; ctx.drawImage(img, ox + x * k + (it.w * k - w) / 2, oy + (y + it.h) * k - h, w, h); } catch (e) { drawCoin(ctx, ox + x * k, oy + y * k, it.w * k, it.h * k); }
+      } else drawCoin(ctx, ox + x * k, oy + y * k, it.w * k, it.h * k);
+      continue;
+    }
+    for (const [ax, ay, aw, c] of artRuns(it)) R(x + ax * 2, y + ay * 2, aw * 2, 2, c);
+  }
+}
+function drawStamp(ctx, cx, cy, r, col) {
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(-0.2); ctx.strokeStyle = col; ctx.fillStyle = col;
+  ctx.lineWidth = r * 0.17; ctx.beginPath(); ctx.arc(0, 0, r * 0.85, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = r * 0.08; ctx.beginPath(); ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2); ctx.stroke();
+  ctx.font = `700 ${Math.round(r * 0.8)}px ${getComputedStyle(document.body).fontFamily}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('꼬', 0, r * 0.04);
+  ctx.restore();
+}
+async function saveWeekCard() {
+  const t = todayStr(), mon = weekMon(t), sun = addDays(mon, 6), I = stampInfo(), n = I.weeks[mon] || 0, st = missionState(mon);
+  const M = moodSum(allTxs().filter(x => x.date >= mon && x.date <= t));
+  const got = n * STAMP_RULE.day + (n >= STAMP_RULE.weekDays ? STAMP_RULE.week : 0) + (st && st.done ? STAMP_RULE.mission : 0);
+  const W = 1080, H = 1350, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d'), FONT = getComputedStyle(document.body).fontFamily || 'sans-serif';
+  try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) { /* ignore */ }
+  ctx.fillStyle = '#FFF8EC'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#3D2E2A'; ctx.font = `700 58px ${FONT}`; ctx.textBaseline = 'alphabetic'; ctx.fillText('이번 주 꼬박꼬박', 80, 132);
+  ctx.fillStyle = '#8A7466'; ctx.font = `500 34px ${FONT}`; ctx.fillText(`${mdLabel(mon)} ~ ${mdLabel(sun)}`, 80, 186);
+  ctx.fillStyle = '#3D2E2A'; ctx.fillRect(74, 226, 932, 702);
+  await drawRoom(ctx, 80, 232, 920 / ROOM_W);
+  ctx.font = `600 30px ${FONT}`; ctx.textAlign = 'center';
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(mon, i), cx = 80 + 66 + i * 131;
+    ctx.fillStyle = '#8A7466'; ctx.fillText(WD[i], cx, 990);
+    ctx.strokeStyle = '#E8D9C4'; ctx.lineWidth = 3; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.arc(cx, 1052, 44, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    if (I.days.has(d)) drawStamp(ctx, cx, 1052, 50, '#D8453B');
+  }
+  ctx.textAlign = 'left';
+  const stat = (x, lab, val) => { ctx.fillStyle = '#8A7466'; ctx.font = `500 28px ${FONT}`; ctx.fillText(lab, x, 1170); ctx.fillStyle = '#3D2E2A'; ctx.font = `700 46px ${FONT}`; ctx.fillText(val, x, 1226); };
+  stat(80, '기록한 날', `${n} / 7일`);
+  stat(390, '받은 도장', `+${got}개`);
+  stat(680, '기분', M.tagged ? `😊${M.cnt.good} 😐${M.cnt.meh} 😣${M.cnt.bad}` : '–');
+  ctx.fillStyle = '#B29A88'; ctx.font = `500 26px ${FONT}`; ctx.textAlign = 'right'; ctx.fillText('꼬박꼬박 가계부', W - 80, H - 60);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  if (!blob) { toast('카드를 만들지 못했어요'); return; }
+  await saveFile(`꼬박꼬박_${mon}.png`, blob);
+}
+
+/* --- 끌어서 옮기기 · 화살표 키 --- */
+let rmDrag = null, rmSwallow = 0, rmKeyT = 0;
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest && e.target.closest('.room.edit .rm-item');
+  if (!el || (e.button != null && e.button > 0) || S.mode === 'denied') return;
+  const it = itemOf(el.dataset.id), room = el.closest('.room');
+  if (!it || !room) return;
+  const r = room.getBoundingClientRect(), x0 = parseFloat(el.style.left) / 100 * ROOM_W, y0 = parseFloat(el.style.top) / 100 * ROOM_H;
+  rmDrag = { el, it, id: el.dataset.id, sx: e.clientX, sy: e.clientY, x0, y0, x: x0, y: y0, k: ROOM_W / r.width, pid: e.pointerId, moved: false };
+  try { el.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+});
+document.addEventListener('pointermove', e => {
+  const d = rmDrag;
+  if (!d || e.pointerId !== d.pid) return;
+  const dx = (e.clientX - d.sx) * d.k, dy = (e.clientY - d.sy) * d.k;
+  if (!d.moved && Math.hypot(dx, dy) < 2.5) return;
+  d.moved = true;
+  e.preventDefault();
+  const p = clampPos(d.it, d.x0 + dx, d.y0 + dy);
+  d.x = p.x; d.y = p.y;
+  d.el.style.left = pcs(p.x, ROOM_W); d.el.style.top = pcs(p.y, ROOM_H); d.el.style.zIndex = 300;
+  d.el.classList.add('dragging');
+});
+function endRoomDrag(e) {
+  const d = rmDrag;
+  if (!d || e.pointerId !== d.pid) return;
+  rmDrag = null;
+  d.el.classList.remove('dragging');
+  if (d.moved) { rmSwallow = Date.now(); S.roomSel = d.id; saveRoomPos(d.id, d.x, d.y); renderView(); const b = document.getElementById('rm-' + d.id); if (b) b.focus({ preventScroll: true }); }
+  else if (deferred) renderView();
+}
+document.addEventListener('pointerup', endRoomDrag);
+document.addEventListener('pointercancel', endRoomDrag);
+function nudgeRoom(id, dx, dy, live) {
+  const it = itemOf(id), el = document.getElementById('rm-' + id);
+  if (!it || !el) return;
+  const x = parseFloat(el.style.left) / 100 * ROOM_W, y = parseFloat(el.style.top) / 100 * ROOM_H, p = clampPos(it, x + dx, y + dy);
+  el.style.left = pcs(p.x, ROOM_W); el.style.top = pcs(p.y, ROOM_H); el.style.zIndex = zOf(it, p.y);
+  clearTimeout(rmKeyT);
+  if (live) rmKeyT = setTimeout(() => saveRoomPos(id, p.x, p.y), 450);
+  else saveRoomPos(id, p.x, p.y);
+}
+document.addEventListener('keydown', e => {
+  const el = e.target.closest && e.target.closest('.room.edit .rm-item');
+  if (!el || !$('#sheetWrap').hidden) return;
+  const k = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+  if (k) { e.preventDefault(); const step = e.shiftKey ? 8 : 2; S.roomSel = el.dataset.id; el.classList.add('sel'); nudgeRoom(el.dataset.id, k[0] * step, k[1] * step, true); }
+  else if (e.key === 'Escape' && S.roomSel) { S.roomSel = null; renderView(); }
+});
+
+/* --- 정기결제 점검 --- */
+function subCheckBlock(f) {
+  if (!f.id || !S.subs[f.id]) return '';
+  const at = +S.subs[f.id].checkedAt || 0;
+  return `<div class="sub-check"><div><span class="card-t">점검</span><p>이 정기결제, 아직 필요해요?${at ? ` <span class="muted">마지막 점검 ${mdLabel(toYmd(new Date(at)))}</span>` : ''}</p></div><button class="btn btn-soft btn-sm" type="button" id="subCheck" data-act="sub-check" data-id="${esc(f.id)}">필요해요 · 점검 완료</button></div><p class="set-note sub-check-note">필요 없다면 아래 ‘사용 중’을 끄거나 삭제하세요.</p>`;
+}
+
+/* --- 버튼 동작 --- */
+const ROOM_ACT = {
+  'f-mood': el => { F.mood = F.mood === el.dataset.v ? '' : el.dataset.v; for (const b of document.querySelectorAll('#sheet [data-act="f-mood"]')) b.setAttribute('aria-pressed', String(b.dataset.v === F.mood)); },
+  'mood-set': el => { setMood(el.dataset.id, el.dataset.v); if (F && F.mode === 'mood') rerenderSheet(moodSheet()); },
+  'mood-batch': el => openMoodSheet(el.dataset.from, el.dataset.to, el.dataset.t),
+  'go-room': () => go('room'),
+  'rm-sel': el => { if (Date.now() - rmSwallow < 450) return; S.roomSel = S.roomSel === el.dataset.id ? null : el.dataset.id; renderView(); const b = document.getElementById('rm-' + el.dataset.id); if (b) b.focus({ preventScroll: true }); },
+  'rm-done': () => { S.roomSel = null; renderView(); },
+  'rm-nudge': el => { if (S.roomSel) nudgeRoom(S.roomSel, +el.dataset.dx * 2, +el.dataset.dy * 2, false); },
+  'rm-store': el => { storeItem(el.dataset.id); renderView(); },
+  'rm-place': el => { placeItem(el.dataset.id); renderView(); },
+  'rm-buy': el => buyItem(el.dataset.id),
+  'rm-bg': el => { const b = BG[el.dataset.id]; if (!b || !ownsBg(b.id) || S.mode === 'denied') return; writeRoom({ set: { ...roomSet(), [b.kind]: b.id } }); },
+  'rm-tab': el => { S.roomTab = el.dataset.v; renderView(); const b = document.getElementById('st-' + el.dataset.v); if (b) b.focus(); },
+  'ms-pick': el => { if (S.mode === 'denied') return; const mon = weekMon(todayStr()); writeRoom({ ['mw_' + mon]: { pick: el.dataset.id, at: Date.now() } }); toast('이번 주 미션을 골랐어요. 마치면 도장 +3!'); },
+  'ms-change': () => { if (S.mode === 'denied') return; const mon = weekMon(todayStr()); writeRoom({ ['mw_' + mon]: { pick: '', at: Date.now() } }); },
+  'week-card': () => saveWeekCard(),
+  'rv-memo': el => { openMemoSheet(null); if (F && F.mode === 'memo' && catsOf('out').some(c => c.id === el.dataset.cat)) { F.cat = el.dataset.cat; rerenderSheet(memoSheet()); const n = $('#m-name'); if (n) n.focus(); } },
+  'sub-check': el => { const s = S.subs[el.dataset.id]; if (!s || S.mode === 'denied') return; writeSubs({ [el.dataset.id]: { ...s, checkedAt: Date.now() } }); if (F && F.mode === 'sub') rerenderSheet(subSheet()); toast(`‘${s.name}’ 점검했어요`); },
+};
+if (window.__MOCK__) window.__stamps = () => { const I = stampInfo(); return { days: [...I.days].sort(), earned: I.earned, spent: I.spent, bal: I.bal, weeks: I.weeks }; }; // test hook
+
 /* ================= toast ================= */
 let toastTimer = 0, toastUndo = null;
 function toast(msg, opts = {}) {
@@ -3878,7 +4910,7 @@ const ACT = {
   ai: () => openAiSheet(),
   'day-open': el => openDaySheet(el.dataset.date),
   'add-goal': () => openGoalSheet(null),
-  nospend: el => { writeNoSpend(el.dataset.date, el.dataset.on === '1'); toast(el.dataset.on === '1' ? '무지출로 체크했어요. 잘했어요!' : '무지출 체크를 취소했어요'); if (F && F.mode === 'day') openDaySheet(el.dataset.date); },
+  nospend: el => { writeNoSpend(el.dataset.date, el.dataset.on === '1'); checkGifts(); toast(el.dataset.on === '1' ? '무지출로 체크했어요. 잘했어요!' : '무지출 체크를 취소했어요'); if (F && F.mode === 'day') openDaySheet(el.dataset.date); },
   setup: () => openSetupSheet(),
   'su-rate': el => { if (!F) return; F.rate = +el.dataset.v; rerenderSheet(setupSheet()); },
   'credit-del': el => { const id = el.dataset.id, prev = S.credit[id]; if (!prev) return; writeCredit({ [id]: null }); toast('기록을 지웠어요', { undo: () => writeCredit({ [id]: prev }) }); },
@@ -3980,6 +5012,7 @@ const ACT = {
   's-method': el => { F.method = el.dataset.id; for (const b of document.querySelectorAll('#sheet [data-act="s-method"]')) b.setAttribute('aria-pressed', String(b.dataset.id === F.method)); },
   's-active': el => { F.active = !F.active; el.setAttribute('aria-checked', String(F.active)); },
   's-delete': () => deleteSub(),
+  ...ROOM_ACT,
 };
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act], [data-view]');
