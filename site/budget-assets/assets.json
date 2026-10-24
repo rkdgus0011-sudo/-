@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "format": "transparent-png-atlas + individual transparent PNGs",
+  "positionConvention": "1-based row and column; visual reference only, not crop bounds",
+  "sheets": [
+    {
+      "id": "characters",
+      "src": "images/characters.png",
+      "rows": 2,
+      "columns": 3
+    },
+    {
+      "id": "furniture",
+      "src": "images/furniture.png",
+      "rows": 3,
+      "columns": 3
+    }
+  ],
+  "items": [
+    {
+      "id": "character_01",
+      "name": "기본 맨투맨",
+      "sheet": "characters",
+      "row": 1,
+      "column": 1,
+      "file": "budget-assets/characters/character_01.png",
+      "width": 203,
+      "height": 359
+    },
+    {
+      "id": "character_02",
+      "name": "복숭아 카디건",
+      "sheet": "characters",
+      "row": 1,
+      "column": 2,
+      "file": "budget-assets/characters/character_02.png",
+      "width": 223,
+      "height": 340
+    },
+    {
+      "id": "character_03",
+      "name": "민트 베레모",
+      "sheet": "characters",
+      "row": 1,
+      "column": 3,
+      "file": "budget-assets/characters/character_03.png",
+      "width": 217,
+      "height": 363
+    },
+    {
+      "id": "character_04",
+      "name": "별빛 잠옷",
+      "sheet": "characters",
+      "row": 2,
+      "column": 1,
+      "file": "budget-assets/characters/character_04.png",
+      "width": 240,
+      "height": 347
+    },
+    {
+      "id": "character_05",
+      "name": "정원사",
+      "sheet": "characters",
+      "row": 2,
+      "column": 2,
+      "file": "budget-assets/characters/character_05.png",
+      "width": 206,
+      "height": 355
+    },
+    {
+      "id": "character_06",
+      "name": "별빛 왕관",
+      "sheet": "characters",
+      "row": 2,
+      "column": 3,
+      "file": "budget-assets/characters/character_06.png",
+      "width": 256,
+      "height": 350
+    },
+    {
+      "id": "furniture_01",
+      "name": "소파",
+      "sheet": "furniture",
+      "row": 1,
+      "column": 1,
+      "file": "budget-assets/furniture/furniture_01.png",
+      "width": 360,
+      "height": 272
+    },
+    {
+      "id": "furniture_02",
+      "name": "가계부 테이블",
+      "sheet": "furniture",
+      "row": 1,
+      "column": 2,
+      "file": "budget-assets/furniture/furniture_02.png",
+      "width": 360,
+      "height": 285
+    },
+    {
+      "id": "furniture_03",
+      "name": "침대",
+      "sheet": "furniture",
+      "row": 1,
+      "column": 3,
+      "file": "budget-assets/furniture/furniture_03.png",
+      "width": 360,
+      "height": 351
+    },
+    {
+      "id": "furniture_04",
+      "name": "책장",
+      "sheet": "furniture",
+      "row": 2,
+      "column": 1,
+      "file": "budget-assets/furniture/furniture_04.png",
+      "width": 347,
+      "height": 360
+    },
+    {
+      "id": "furniture_05",
+      "name": "화분",
+      "sheet": "furniture",
+      "row": 2,
+      "column": 2,
+      "file": "budget-assets/furniture/furniture_05.png",
+      "width": 305,
+      "height": 360
+    },
+    {
+      "id": "furniture_06",
+      "name": "스탠드 조명",
+      "sheet": "furniture",
+      "row": 2,
+      "column": 3,
+      "file": "budget-assets/furniture/furniture_06.png",
+      "width": 196,
+      "height": 360
+    },
+    {
+      "id": "furniture_07",
+      "name": "저금통 테이블",
+      "sheet": "furniture",
+      "row": 3,
+      "column": 1,
+      "file": "budget-assets/furniture/furniture_07.png",
+      "width": 291,
+      "height": 360
+    },
+    {
+      "id": "furniture_08",
+      "name": "러그",
+      "sheet": "furniture",
+      "row": 3,
+      "column": 2,
+      "file": "budget-assets/furniture/furniture_08.png",
+      "width": 360,
+      "height": 207
+    },
+    {
+      "id": "furniture_09",
+      "name": "별빛 서랍장",
+      "sheet": "furniture",
+      "row": 3,
+      "column": 3,
+      "file": "budget-assets/furniture/furniture_09.png",
+      "width": 338,
+      "height": 360
+    }
+  ],
+  "suggestedRewards": [
+    {
+      "mission": "첫 가계부 기록",
+      "itemIds": [
+        "furniture_05"
+      ]
+    },
+    {
+      "mission": "7일 연속 기록",
+      "itemIds": [
+        "character_04"
+      ]
+    },
+    {
+      "mission": "월간 목표 달성",
+      "itemIds": [
+        "character_06",
+        "furniture_09"
+      ]
+    }
+  ],
+  "individualFiles": "Each item has its own trimmed transparent PNG at \"file\" (cut along the real alpha outline, not the grid)."
+}

@@ -3,7 +3,7 @@
    - 가계부 화면(app.js)이 쓰는 저장소 API(db·user·downloads)를 Supabase 위에 만들어 줘요. */
 (() => {
 'use strict';
-const VERSION = '1.14.0';
+const VERSION = '1.16.0';
 const TERMS_VERSION = '2026-10-21'; // 약관·처리방침을 크게 바꾸면 날짜를 올려 다시 동의를 받아요
 const CFG = window.TTB_CONFIG || {};
 const TABLE = 'ledger_docs';
